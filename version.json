@@ -1,27 +1,27 @@
 {
- "version": 7,
+ "version": 8,
  "nativo": 2,
- "fecha": "2026-10-21 23:12",
+ "fecha": "2026-10-21 23:34",
  "juegos": {
   "cubos": {
    "index.html": "3a5b671fe7c625fffa1de67107bece540296b0e29714eac741a5c30dd570b2cd",
    "game.js": "da3d61d189900936a291d06a5accbd7d4c69cd2e4e364e4837c0d48d69a0c43b",
-   "engine.js": "bb4e1974c2d24cef8292e96673cdc2e615a272f524db7131ec59f5fb20c80ab9"
+   "engine.js": "e5c5ff31b87ad40d95f4c2904308e15bed025b5693accfdccdc2ff73412b8275"
   },
   "dulces": {
    "index.html": "29912eb5a837e8413fc820adb257e2e5163d70da548a539a1b49ff0cd21039d7",
    "game.js": "fb85af58019cd4025ba1de78ea483f59cfab0ca3b116aef5dbff3b3b9394a4a1",
-   "engine.js": "bb4e1974c2d24cef8292e96673cdc2e615a272f524db7131ec59f5fb20c80ab9"
+   "engine.js": "e5c5ff31b87ad40d95f4c2904308e15bed025b5693accfdccdc2ff73412b8275"
   },
   "mascotas": {
    "index.html": "51f2d927eb0f0c0caa960d1b423b61ce270cdee40d87c4bdc0d4d69ebd03efac",
-   "game.js": "a6027b2cdf9be15b424f17181318d6ae3f935e14938ef8bec94e84c9433f36e9",
-   "engine.js": "bb4e1974c2d24cef8292e96673cdc2e615a272f524db7131ec59f5fb20c80ab9"
+   "game.js": "2fba2ba0682dbd7c48b16a99ece5e5526ffb4ca23c884ac2a280f8cd2c3ab96c",
+   "engine.js": "e5c5ff31b87ad40d95f4c2904308e15bed025b5693accfdccdc2ff73412b8275"
   },
   "burbujas": {
    "index.html": "37c9f3c1d0dc180b64725420cd74170bdaef68a1fb2ea6830506ec9df9bb7a92",
    "game.js": "a6f36ec154f1da10c857d9ae226479c7f3e94f3ffcb93bbbc3c3dcff39c6a6b3",
-   "engine.js": "bb4e1974c2d24cef8292e96673cdc2e615a272f524db7131ec59f5fb20c80ab9"
+   "engine.js": "e5c5ff31b87ad40d95f4c2904308e15bed025b5693accfdccdc2ff73412b8275"
   }
  }
 }

@@ -114,7 +114,8 @@ const E = {};
 
   // ---------------------------------------------------------------- dibujo
   E.rr = function (g, x, y, w, h, r) {
-    r = Math.min(r, w / 2, h / 2);
+    if (w < 0) { x += w; w = -w; }
+    r = Math.max(0, Math.min(r, w / 2, h / 2));
     g.beginPath();
     g.moveTo(x + r, y);
     g.arcTo(x + w, y, x + w, y + h, r);

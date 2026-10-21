@@ -1163,7 +1163,7 @@ const GAME = {
       }
       // el cohete recargable con el gatito ayudante
       const full = S.charge >= CHARGE_FULL;
-      const barX = bx + 70, barW = S.C * ts - 150;
+      const barX = bx + 70, barW = Math.max(40, S.C * ts - 150);
       E.emoji(g, '🐱', bx + 32, rackY, 54);
       E.rr(g, barX, rackY - 14, barW, 28, 14); g.fillStyle = 'rgba(255,255,255,0.85)'; g.fill();
       E.rr(g, barX + 4, rackY - 10, (barW - 8) * chargeShown, 20, 10); g.fillStyle = full ? '#ffb020' : '#ff7a1a'; g.fill();
