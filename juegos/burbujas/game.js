@@ -834,6 +834,7 @@ const GAME = {
   GAME.collection = { type: 'panda', label: 'Crías liberadas', icon: '🐼' };
   GAME.startBoosters = [{ id: 'lantern', icon: '🏮', name: 'Farolillo lleno' }, { id: 'plus3', icon: '➕', name: '+3 burbujas' }, { id: 'rainbow', icon: '🌈', name: 'Burbuja arcoíris' }];
   GAME.streakBonus = [['lantern'], ['lantern', 'plus3'], ['lantern', 'plus3', 'rainbow']];
+  GAME.usesAim = true;
   GAME.boosters = [
     { id: 'bomb', icon: '💣', target: false },
     { id: 'rainbow', icon: '🌈', target: false },
@@ -907,6 +908,12 @@ const GAME = {
         E.sfx('swap');
         return;
       }
+      // disparo con confirmación (Ajustes): con la línea fija, tocar a mamá panda lanza; tocar en otro sitio vuelve a apuntar
+      if (pendingAng != null) {
+        const [sx0, sy0] = shooterXY();
+        if (Math.hypot(x - sx(sx0), y - (sy(sy0) + D * k * 0.4)) < D * k * 1.5) { const a = pendingAng; pendingAng = null; fire(a); return; }
+        pendingAng = null;
+      }
       aim = { x, y };
     };
     P.move = function (x, y) { if (aim) { aim.x = x; aim.y = y; } };
@@ -916,8 +923,10 @@ const GAME = {
       const ang = aimAngle();
       aim = null;
       if (ang == null) return;
+      if (E.save.confirmShot) { pendingAng = ang; E.sfx('click'); return; }
       fire(ang);
     };
+    let pendingAng = null;
     function aimAngle() {
       if (!aim) return null;
       const [x0, y0] = shooterXY();
@@ -1195,6 +1204,11 @@ const GAME = {
         E.emoji(g, '🐼', x, y, size * 0.8);
       }
       if (aim && !shot) { const ang = aimAngle(); if (ang != null) drawAim(g, ang, 0.95); }
+      else if (pendingAng != null && !shot) {
+        drawAim(g, pendingAng, 0.95);
+        const [sx0, sy0] = shooterXY();
+        E.text(g, '¡Toca a mamá panda para lanzar!', E.W / 2, sy(sy0) - D * k * 1.6, 24, '#fff', { stroke: '#5a4bd1', sw: 5 });
+      }
       else if (hint && !shot && hint.t < 3) drawAim(g, hint.ang, 0.5 + Math.sin(hint.t * 6) * 0.3);
       // lanzador: mamá panda con la burbuja
       const [x0, y0] = shooterXY();

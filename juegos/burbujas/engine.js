@@ -68,10 +68,14 @@ const E = {};
   let dpr = 1;
   E.resize = function () {
     dpr = Math.min(window.devicePixelRatio || 1, 2);
-    cv.width = Math.round(window.innerWidth * dpr);
+    // en pantallas apaisadas (ordenador) el juego se dibuja en vertical y centrado, como en la tablet
+    const cw = Math.min(window.innerWidth, Math.round(window.innerHeight * 0.625)); // 600×960, como la tablet
+    cv.width = Math.round(cw * dpr);
     cv.height = Math.round(window.innerHeight * dpr);
-    cv.style.width = window.innerWidth + 'px';
+    cv.style.width = cw + 'px';
     cv.style.height = window.innerHeight + 'px';
+    cv.style.marginLeft = Math.max(0, Math.floor((window.innerWidth - cw) / 2)) + 'px';
+    if (cw < window.innerWidth) document.body.style.background = 'linear-gradient(' + GAME.theme.bg[0] + ',' + GAME.theme.bg[1] + ')';
     E.scale = cv.width / E.W;
     E.H = cv.height / E.scale;
     spriteCache.clear();
@@ -593,8 +597,22 @@ const E = {};
     });
     E.button('snd', E.W - 84, 14, 66, 64, '', {
       color: '#3f8fd9', r: 18,
-      draw: (gg, x, y, w, h) => E.emoji(gg, E.soundIcon(), x + w / 2, y + h / 2, 38),
-      cb: () => E.cycleSound(),
+      draw: (gg, x, y, w, h) => E.emoji(gg, '⚙️', x + w / 2, y + h / 2, 38),
+      cb: () => E.openSettings(),
+    });
+    // misiones de la semana
+    const MS = missionState(), pend = missionList().filter((m) => !MS.done.includes(m.id)).length;
+    E.button('missions', 20, E.H - 250, 170, 84, '', {
+      color: '#8a5cd6', r: 26,
+      draw: (gg, x, y, w, h) => { E.emoji(gg, '📋', x + 38, y + h / 2, 42); E.text(gg, 'Misiones', x + 110, y + h / 2 - 12, 22, '#fff'); E.text(gg, pend ? pend + ' por hacer' : '¡Todas!', x + 110, y + h / 2 + 14, 18, '#fff'); },
+      cb: () => E.openMissions(),
+    });
+    // día especial
+    const FI = E.fiesta();
+    if (FI) E.button('fiesta', E.W - 216, 100, 200, 80, '', {
+      color: FI.done ? '#9aa3ad' : '#e8459a', r: 26,
+      draw: (gg, x, y, w, h) => { E.emoji(gg, FI.emoji, x + 42, y + h / 2, 46); E.text(gg, FI.done ? '¡Hecho!' : 'Nivel', x + 135, y + h / 2 - 12, 22, '#fff'); E.text(gg, 'especial', x + 135, y + h / 2 + 14, 20, '#fff'); },
+      cb: () => E.openFiesta(),
     });
     // desafío de la semana
     const W2 = E.weekly();
@@ -750,9 +768,107 @@ const E = {};
     playS.challenge = W2;
     openPreLevel(W2.n, true);
   };
+  // ---------------------------------------------------------------- fechas especiales
+  // Su cumpleaños y su santo se ponen aquí (mes, día) y llegan por ./publicar.sh
+  E.FECHAS = { cumple: null, santo: null };
+  function easter(y) { // domingo de Pascua (algoritmo de Gauss/Meeus)
+    const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3);
+    const h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+    const month = Math.floor((h + l - 7 * m + 114) / 31), day = ((h + l - 7 * m + 114) % 31) + 1;
+    return new Date(y, month - 1, day);
+  }
+  E.specialDay = function (date) {
+    const d = date || new Date(), M = d.getMonth() + 1, D = d.getDate(), Y = d.getFullYear();
+    const same = (m, dd) => M === m && D === dd;
+    const F = E.FECHAS;
+    if (F.cumple && same(F.cumple[0], F.cumple[1])) return { id: 'cumple', name: '¡Feliz cumpleaños, abuela!', emoji: '🎂' };
+    if (F.santo && same(F.santo[0], F.santo[1])) return { id: 'santo', name: '¡Feliz santo, abuela!', emoji: '💐' };
+    if (M === 12 && D >= 24 && D <= 26) return { id: 'navidad', name: '¡Feliz Navidad!', emoji: '🎄' };
+    if (same(12, 31)) return { id: 'nochevieja', name: '¡Feliz Nochevieja!', emoji: '🥂' };
+    if (same(1, 1)) return { id: 'anonuevo', name: '¡Feliz Año Nuevo!', emoji: '🎆' };
+    if (same(1, 6)) return { id: 'reyes', name: '¡Feliz Día de Reyes!', emoji: '👑' };
+    const ea = easter(Y), diff = Math.round((new Date(Y, M - 1, D) - ea) / 864e5);
+    if (diff >= -3 && diff <= 0) return { id: 'pascua', name: '¡Feliz Semana Santa!', emoji: '🐣' };
+    if (M === 5 && d.getDay() === 0 && D <= 7) return { id: 'madre', name: '¡Feliz Día de la Madre!', emoji: '💐' };
+    return null;
+  };
+  E.fiesta = function () {
+    const sd = E.specialDay();
+    if (!sd) return null;
+    const key = E.today();
+    const doy = Math.floor((new Date() - new Date(new Date().getFullYear(), 0, 0)) / 864e5);
+    return Object.assign({ kind: 'fiesta', key, n: 9000 + doy * 3 + (new Date().getFullYear() % 3), done: E.save.fiestaDone === key, greeted: E.save.fiestaGreet === key }, sd);
+  };
+  // al abrir el juego en un día especial: felicitación con regalo (una vez al día)
+  function fiestaGreeting(then) {
+    const f = E.fiesta();
+    if (!f || f.greeted) { if (then) then(); return; }
+    E.save.fiestaGreet = f.key;
+    const got = giveRandomStart(2);
+    rewardPopup(f.name, 'Hoy tienes un regalo y un nivel especial en el mapa.', got.map((b) => b.icon), then, f.emoji);
+  }
+  E.openFiesta = function () {
+    const f = E.fiesta();
+    if (!f) return;
+    if (f.done) { rewardPopup(f.name, '¡Ya has superado el nivel especial de hoy!', [], null, f.emoji); return; }
+    playS.challenge = f;
+    openPreLevel(f.n, true);
+  };
+
+  // ---------------------------------------------------------------- misiones de la semana
+  // Tres misiones que cambian cada lunes (como las de los originales); cada una da potenciadores.
+  function missionList() {
+    const w = weekNo(), r = E.rng(w * 7919 + GAME.id.length * 31), col = GAME.collection;
+    const pool = [
+      { id: 'wins', text: (k) => 'Supera ' + k + ' niveles', k: r.pick([8, 10, 12, 15]) },
+      { id: 'stars', text: (k) => 'Consigue ' + k + ' estrellas', k: r.pick([15, 20, 25, 30]) },
+      { id: 'three', text: (k) => 'Supera ' + k + ' niveles con 3 estrellas', k: r.pick([3, 5, 6]) },
+      { id: 'clean', text: (k) => 'Supera ' + k + ' niveles sin usar ayudas', k: r.pick([3, 5, 8]) },
+    ];
+    if (col) pool.push({ id: 'col', text: (k) => col.label.split(' ')[0] + ': consigue ' + k + ' ' + col.icon, k: r.pick([30, 50, 80]) });
+    return r.shuffle(pool).slice(0, 3).map((m) => Object.assign(m, { name: m.text(m.k) }));
+  }
+  function missionState() {
+    const w = weekNo();
+    if (!E.save.mis || E.save.mis.week !== w) E.save.mis = { week: w, prog: {}, done: [] };
+    return E.save.mis;
+  }
+  // se llama al apuntar cada intento (y al recoger la colección): suma a las misiones de la semana
+  function missionAdd(id, k) { if (E.fast || !k) return; const st = missionState(); st.prog[id] = (st.prog[id] || 0) + k; }
+  function missionsDone() {
+    const st = missionState(), got = [];
+    for (const m of missionList()) if (!st.done.includes(m.id) && (st.prog[m.id] || 0) >= m.k) { st.done.push(m.id); got.push(m); }
+    return got;
+  }
+  E.openMissions = function () {
+    const L = missionList(), st = missionState();
+    E.openPopup({
+      draw(g) {
+        const w = 540, h = 230 + L.length * 120, x = (E.W - w) / 2, y = (E.H - h) / 2;
+        E.panel(g, x, y, w, h, GAME.theme.panel);
+        E.text(g, '📋 Misiones de la semana', E.W / 2, y + 55, 36, GAME.theme.accent, { stroke: '#fff', sw: 7 });
+        L.forEach((m, i) => {
+          const yy = y + 100 + i * 120, v = Math.min(m.k, st.prog[m.id] || 0), done = st.done.includes(m.id);
+          E.rr(g, x + 24, yy, w - 48, 104, 18); g.fillStyle = done ? 'rgba(160,230,150,0.85)' : 'rgba(255,255,255,0.75)'; g.fill();
+          E.wrapText(g, m.name, E.W / 2, yy + 26, w - 90, 24, '#5a3a1a', { stroke: false });
+          E.rr(g, x + 50, yy + 62, w - 100, 24, 12); g.fillStyle = 'rgba(0,0,0,0.12)'; g.fill();
+          E.rr(g, x + 50, yy + 62, Math.max(24, (w - 100) * (v / m.k)), 24, 12); g.fillStyle = done ? '#2a8a2a' : '#3cb93c'; g.fill();
+          E.text(g, done ? '¡Hecha! 🎁' : v + ' / ' + m.k, E.W / 2, yy + 74, 18, '#fff', { stroke: 'rgba(0,0,0,0.4)', sw: 3 });
+        });
+        E.text(g, 'Cambian cada lunes', E.W / 2, y + h - 112, 20, '#7a4b1f', { stroke: false });
+        E.button('mi_ok', x + 140, y + h - 92, w - 280, 76, 'Volver', { color: '#3cb93c', size: 32, cb: () => E.closePopup() });
+      },
+      back() { E.closePopup(); },
+    });
+  };
+
   // después de ganar: cofre lleno, mundo nuevo y luego el siguiente nivel
   function afterWin(n) {
     const steps = [];
+    for (const m of missionsDone()) steps.push((next) => {
+      const got = giveRandomStart(2);
+      rewardPopup('¡Misión cumplida!', m.name + '. Te llevas 2 potenciadores para empezar.', got.map((b) => b.icon), next, '📋');
+    });
     for (const g2 of newAchievements()) steps.push((next) => {
       const got = giveRandomStart(1);
       rewardPopup('¡Logro conseguido!', g2.a.name + ': ' + g2.target + '. Te llevas un potenciador para empezar.', got.map((b) => b.icon), next, g2.a.icon);
@@ -775,16 +891,20 @@ const E = {};
     const goals = spec.goals.map((gl) => Object.assign({}, gl, { left: gl.count }));
     const chosen = new Set();
     const SB = GAME.startBoosters || [];
+    // si un nivel se resiste (6 intentos sin superarlo), sus potenciadores de inicio salen gratis y ya marcados
+    const HELP_AT = 6;
+    const help = !challenge && ((E.save.fails && E.save.fails[n]) || 0) >= HELP_AT;
+    if (help) SB.forEach((b) => chosen.add(b.id));
     if (spec.text) E.say(spec.text);
     E.openPopup({
       draw(g) {
-        const extra = (SB.length ? 150 : 0) + (E.save.streak ? 50 : 0) + 80;
+        const extra = (SB.length ? 150 : 0) + (E.save.streak ? 50 : 0) + 80 + (help ? 46 : 0);
         const w = 520, h = (spec.text ? 600 : 520) + extra, x = (E.W - w) / 2, y = (E.H - h) / 2;
         E.panel(g, x, y, w, h, GAME.theme.panel);
         E.rr(g, x + 60, y - 30, w - 120, 76, 30);
         g.fillStyle = GAME.theme.accent; g.fill();
         g.lineWidth = 5; g.strokeStyle = '#fff'; g.stroke();
-        E.text(g, playS.challenge ? '🏅 Desafío semanal' : 'Nivel ' + n, E.W / 2, y + 8, playS.challenge ? 36 : 44, '#fff');
+        E.text(g, playS.challenge ? (playS.challenge.kind === 'fiesta' ? playS.challenge.emoji + ' Nivel especial' : '🏅 Desafío semanal') : 'Nivel ' + n, E.W / 2, y + 8, playS.challenge ? 36 : 44, '#fff');
         if (E.isHard(n)) E.text(g, E.hardness(n) === 2 ? '💀 ¡Nivel superdifícil! 💀' : '💀 ¡Nivel difícil!', E.W / 2, y + 82, 30, E.hardness(n) === 2 ? '#5b2a86' : '#ff5a5a', { stroke: '#fff', sw: 6 });
         E.text(g, 'Objetivo', E.W / 2, y + 128, 34, GAME.theme.hudText || '#7a4b1f', { stroke: false });
         E.rr(g, x + 40, y + 160, w - 80, 180, 20);
@@ -797,17 +917,21 @@ const E = {};
           E.text(g, '🔥 Racha de ' + E.save.streak + (E.save.streak === 1 ? ' victoria' : ' victorias') + (sb ? ': empiezas con ' + sb : ''), E.W / 2, yy + 14, 26, '#d2481f', { stroke: false });
           yy += 50;
         }
+        if (help) {
+          E.text(g, '💪 ¡Este nivel se resiste! Hoy los potenciadores son gratis', E.W / 2, yy + 12, 22, '#2a8a2a', { stroke: false });
+          yy += 46;
+        }
         if (SB.length) {
           E.text(g, 'Potenciadores para empezar', E.W / 2, yy + 10, 24, GAME.theme.hudText || '#7a4b1f', { stroke: false });
           const bw = 110, gap = 24, x0 = E.W / 2 - (SB.length * bw + (SB.length - 1) * gap) / 2;
           SB.forEach((b, i) => {
-            const have = E.save.inv[b.id] || 0, on = chosen.has(b.id);
+            const have = help ? Infinity : E.save.inv[b.id] || 0, on = chosen.has(b.id);
             E.button('pl_sb' + b.id, x0 + i * (bw + gap), yy + 30, bw, 96, '', {
               color: on ? '#ffb020' : have ? '#5cc24a' : '#b9c0c8', r: 22,
               draw: (gg, bx, by2, bw2, bh2) => {
                 E.emoji(gg, b.icon, bx + bw2 / 2, by2 + bh2 / 2 - 4, 52);
                 gg.beginPath(); gg.arc(bx + bw2 - 14, by2 + bh2 - 12, 18, 0, 7); gg.fillStyle = '#fff'; gg.fill();
-                E.text(gg, on ? '✓' : String(have), bx + bw2 - 14, by2 + bh2 - 12, 22, on ? '#d2481f' : '#2a7a2a', { stroke: false });
+                E.text(gg, on ? '✓' : have === Infinity ? '∞' : String(have), bx + bw2 - 14, by2 + bh2 - 12, 22, on ? '#d2481f' : '#2a7a2a', { stroke: false });
               },
               cb: () => { if (on) chosen.delete(b.id); else if (have > 0) chosen.add(b.id); else E.floatText(E.W / 2, yy, 'Se consiguen con el cofre de estrellas y las rachas', '#fff', 24); },
             });
@@ -817,7 +941,7 @@ const E = {};
         E.button('pl_duo', x + 30, y + h - 205, w - 60, 64, '👥 Por turnos con otra persona: ' + (E.duoOn ? 'Sí' : 'No'), { color: E.duoOn ? '#ff8a1f' : '#8a96a3', size: 24, r: 20, cb: () => { E.duoOn = !E.duoOn; } });
         const play = () => {
           const bonus = streakBonus();
-          for (const id of chosen) { E.save.inv[id] = Math.max(0, (E.save.inv[id] || 0) - 1); bonus.push(id); }
+          for (const id of chosen) { if (!help) E.save.inv[id] = Math.max(0, (E.save.inv[id] || 0) - 1); bonus.push(id); }
           E.persist();
           E.closePopup(() => startLevel(n, null, bonus));
         };
@@ -862,6 +986,9 @@ const E = {};
     // potenciadores de inicio y premio de la racha: especiales colocados antes de empezar
     if (bonus && bonus.length && playS.P.startBonus) playS.P.startBonus(bonus, E.rng(E.playSeed + 77));
     if (bonus && bonus.includes('plus3')) playS.P.moves += 3;
+    // contrarreloj: el nivel trae tiempo (segundos) en vez de movimientos
+    playS.timeTotal = playS.spec.time || 0; playS.bonusT = 0;
+    if (playS.timeTotal) playS.P.moves = Infinity;
     playS.state = 'playing';
     playS.idle = 0;
     playS.journal = { n, seed: E.playSeed, moves0: playS.P.moves, fp: levelPrint(playS.spec), bonus: bonus || [], challenge: playS.challenge || null, ev: [] };
@@ -888,6 +1015,7 @@ const E = {};
         playS.lastGoalT = E.t;
         if (!E.fast) E.save.stats.goals[type] = (E.save.stats.goals[type] || 0) + took;
         if (playS.duo) playS.duo.score[playS.duo.turn] += took;
+        if (GAME.collection && type === GAME.collection.type) missionAdd('col', took);
         if (x != null && gl.pos) {
           // pequeño icono que vuela hasta el panel de objetivos
           const fl = { x, y, gl, s: 1 };
@@ -982,6 +1110,12 @@ const E = {};
       logAttempt('g', starsFor(P, playS.spec));
       journalEnd();
       E.after(0.5, () => (P.finale ? P.finale(win) : win()));
+    } else if (playS.timeTotal && E.timeLeft() <= 0 && !P.dead) {
+      P.dead = true; P.deadMsg = '¡Se acabó el tiempo!';
+      playS.state = 'lost';
+      logAttempt('p');
+      journalEnd();
+      E.after(0.6, lose);
     } else if (P.moves <= 0 || P.dead) {
       playS.state = 'lost';
       logAttempt('p');
@@ -1062,12 +1196,17 @@ const E = {};
     }
     // movimientos
     const mx = E.W - 170, mw = 150;
-    E.text(g, th.movesLabel || 'Movimientos', mx + mw / 2, 34, 22, th.hudText || '#7a4b1f', { stroke: false, weight: '800' });
+    E.text(g, playS.timeTotal ? '⏱ Tiempo' : th.movesLabel || 'Movimientos', mx + mw / 2, 34, 22, th.hudText || '#7a4b1f', { stroke: false, weight: '800' });
     E.rr(g, mx, 52, mw, 92, 20);
     g.fillStyle = 'rgba(255,255,255,0.75)'; g.fill();
-    const low = P.moves <= 5;
-    const ms = low ? 64 + Math.sin(E.t * 8) * 4 : 64;
-    E.text(g, P.moves === Infinity ? '∞' : String(Math.max(0, P.moves)), mx + mw / 2, 100, ms, low ? '#ff4040' : '#3b6fb6', { stroke: '#fff', sw: 8 });
+    if (playS.timeTotal) {
+      const t = Math.max(0, Math.ceil(E.timeLeft())), lowT = t <= 10;
+      E.text(g, Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'), mx + mw / 2, 100, lowT ? 56 + Math.sin(E.t * 8) * 4 : 56, lowT ? '#ff4040' : '#3b6fb6', { stroke: '#fff', sw: 8 });
+    } else {
+      const low = P.moves <= 5;
+      const ms = low ? 64 + Math.sin(E.t * 8) * 4 : 64;
+      E.text(g, P.moves === Infinity ? '∞' : String(Math.max(0, P.moves)), mx + mw / 2, 100, ms, low ? '#ff4040' : '#3b6fb6', { stroke: '#fff', sw: 8 });
+    }
     // barra de puntos con las 3 estrellas (Pet Rescue)
     const sp = playS.spec;
     if (sp && sp.starScores) {
@@ -1090,13 +1229,14 @@ const E = {};
     const bw = Math.min(110, (E.W - 20) / n - 10);
     const gap = (E.W - n * bw) / (n + 1);
     const by = y + (L.barH - bw) / 2 - 4;
-    E.button('pause', gap, by, bw, bw, '', {
+    const mx = (x0) => (E.save.hand === 'izq' ? E.W - x0 - bw : x0); // mano izquierda: barra al revés
+    E.button('pause', mx(gap), by, bw, bw, '', {
       color: '#4a90c2', r: bw / 2,
       draw: (gg, x, yy, w, h) => E.emoji(gg, '⚙️', x + w / 2, yy + h / 2, w * 0.55),
       cb: openPause,
     });
     items.forEach((b, i) => {
-      const x = gap + (i + 1) * (bw + gap);
+      const x = mx(gap + (i + 1) * (bw + gap));
       const active = playS.booster === b.id;
       E.button('b_' + b.id, x, by, bw, bw, '', {
         color: active ? '#ffb020' : '#5cc24a', r: 24,
@@ -1128,20 +1268,41 @@ const E = {};
   function openPause() {
     E.openPopup({
       draw(g) {
-        const w = 480, h = 700, x = (E.W - w) / 2, y = (E.H - h) / 2;
+        const w = 480, h = 470, x = (E.W - w) / 2, y = (E.H - h) / 2;
         E.panel(g, x, y, w, h, GAME.theme.panel);
         E.text(g, 'Pausa', E.W / 2, y + 60, 46, GAME.theme.accent, { stroke: '#fff', sw: 8 });
         E.button('pz_c', x + 50, y + 110, w - 100, 96, 'Seguir jugando', { color: '#3cb93c', size: 34, cb: () => E.closePopup() });
-        E.button('pz_s', x + 50, y + 225, w - 100, 86, 'Sonido: ' + ['No', 'Bajo', 'Alto'][E.vol()], { color: '#3f8fd9', size: 30, cb: () => E.cycleSound() });
-        E.button('pz_b', x + 50, y + 325, w - 100, 86, 'Letra grande: ' + (E.save.big ? 'Sí' : 'No'), { color: '#3f8fd9', size: 30, cb: () => { E.save.big = !E.save.big; E.persist(); } });
-        E.button('pz_v', x + 50, y + 425, w - 100, 86, 'Leer en voz alta: ' + (E.save.voice ? 'Sí' : 'No'), { color: '#3f8fd9', size: 30, cb: () => { E.save.voice = !E.save.voice; E.persist(); if (E.save.voice) E.say('Leeré en voz alta las explicaciones'); } });
-        E.button('pz_m', x + 50, y + 570, w - 100, 96, 'Salir al mapa', { color: '#e8453c', size: 34, cb: () => E.closePopup(confirmExit) });
+        E.button('pz_a', x + 50, y + 222, w - 100, 86, '⚙️ Ajustes', { color: '#3f8fd9', size: 32, cb: () => E.closePopup(() => E.openSettings(openPause)) });
+        E.button('pz_m', x + 50, y + 330, w - 100, 96, 'Salir al mapa', { color: '#e8453c', size: 34, cb: () => E.closePopup(confirmExit) });
         let ver = 0; try { ver = window.AndroidUpdate ? window.AndroidUpdate.version() : 0; } catch (e) { ver = 0; }
         E.text(g, 'Versión ' + (ver || 'de la app'), E.W / 2, y + h - 18, 16, 'rgba(90,58,26,0.55)', { stroke: false });
       },
       back() { E.closePopup(); },
     });
   }
+  // ajustes de comodidad (desde la pausa y desde el mapa)
+  E.dragK = () => ({ suave: 0.2, normal: 0.35, firme: 0.55 })[E.save.drag || 'normal'];
+  E.openSettings = function (back) {
+    const close = () => E.closePopup(back);
+    const opts = [
+      ['Sonido', () => ['No', 'Bajo', 'Alto'][E.vol()], () => E.cycleSound()],
+      ['Letra grande', () => (E.save.big ? 'Sí' : 'No'), () => { E.save.big = !E.save.big; }],
+      ['Leer en voz alta', () => (E.save.voice ? 'Sí' : 'No'), () => { E.save.voice = !E.save.voice; if (E.save.voice) E.say('Leeré en voz alta las explicaciones'); }],
+      ['Ayudas a la', () => (E.save.hand === 'izq' ? 'izquierda' : 'derecha'), () => { E.save.hand = E.save.hand === 'izq' ? 'der' : 'izq'; }],
+    ];
+    if (GAME.usesDrag) opts.push(['Deslizar', () => ({ suave: 'Suave', normal: 'Normal', firme: 'Firme' })[E.save.drag || 'normal'], () => { E.save.drag = { suave: 'normal', normal: 'firme', firme: 'suave' }[E.save.drag || 'normal']; }]);
+    if (GAME.usesAim) opts.push(['Disparar', () => (E.save.confirmShot ? 'Tocando a mamá' : 'Al soltar'), () => { E.save.confirmShot = !E.save.confirmShot; }]);
+    E.openPopup({
+      draw(g) {
+        const w = 500, h = 170 + opts.length * 96 + 100, x = (E.W - w) / 2, y = (E.H - h) / 2;
+        E.panel(g, x, y, w, h, GAME.theme.panel);
+        E.text(g, '⚙️ Ajustes', E.W / 2, y + 60, 42, GAME.theme.accent, { stroke: '#fff', sw: 8 });
+        opts.forEach(([name, val, act], i) => E.button('st_' + i, x + 40, y + 110 + i * 96, w - 80, 82, name + ': ' + val(), { color: '#3f8fd9', size: 28, cb: () => { act(); E.persist(); } }));
+        E.button('st_ok', x + 110, y + h - 120, w - 220, 90, 'Listo', { color: '#3cb93c', size: 34, cb: close });
+      },
+      back() { close(); },
+    });
+  };
   // confirmación para no perder la partida por un toque sin querer
   function confirmExit() {
     E.openPopup({
@@ -1151,7 +1312,7 @@ const E = {};
         E.text(g, '¿Salir del nivel?', E.W / 2, y + 70, 42, GAME.theme.accent, { stroke: '#fff', sw: 8 });
         E.text(g, 'Si sales, tendrás que empezarlo otra vez', E.W / 2, y + 135, 26, '#7a4b1f', { stroke: false });
         E.button('cx_no', x + 50, y + 185, w - 100, 96, 'No, seguir jugando', { color: '#3cb93c', size: 32, cb: () => E.closePopup() });
-        E.button('cx_si', x + 50, y + 300, w - 100, 90, 'Sí, salir', { color: '#e8453c', size: 30, cb: () => E.closePopup(() => { logAttempt('s'); journalEnd(); E.save.streak = 0; E.persist(); goMap(); }) });
+        E.button('cx_si', x + 50, y + 300, w - 100, 90, 'Sí, salir', { color: '#e8453c', size: 30, cb: () => E.closePopup(() => { logAttempt('s'); E.save.fails = E.save.fails || {}; E.save.fails[playS.n] = (E.save.fails[playS.n] || 0) + 1; journalEnd(); E.save.streak = 0; E.persist(); goMap(); }) });
       },
       back() { E.closePopup(); },
     });
@@ -1193,9 +1354,17 @@ const E = {};
     if (playS.challenge) e.ch = 1;
     if (r === 'p') e.left = P.goals.reduce((a, g) => a + Math.max(0, g.left), 0);
     E.save.log = (E.save.log || []).concat([e]).slice(-1500);
+    if (r === 'g' && !playS.challenge) {
+      missionAdd('wins', 1); missionAdd('stars', Math.max(0, (stars || 0) - (E.save.stars[playS.n] || 0)));
+      if (stars === 3) missionAdd('three', 1);
+      if (!playS.uses) missionAdd('clean', 1);
+    }
     setTimeout(() => { E.persist(); E.sendData('nivel ' + e.n); }, 1000);
   }
   E.logAttempt = logAttempt;
+  // contrarreloj: segundos que quedan (solo corre jugando) y caramelos de reloj que suman tiempo
+  E.timeLeft = () => (playS.timeTotal ? playS.timeTotal + playS.bonusT - (playS.activeT || 0) : Infinity);
+  E.addTime = function (sec, x, y) { playS.bonusT += sec; if (!E.fast) { E.floatText(x != null ? x : E.W / 2, y != null ? y : E.H / 2, '+' + sec + ' s', '#2bb24c', 36); E.sfx('collect', 1.3); } };
   // Repite deprisa los toques apuntados de una partida a medias
   E.resumeLevel = (J) => resumeLevel(J);
   function resumeLevel(J) {
@@ -1229,20 +1398,22 @@ const E = {};
   function starsFor(P, spec) {
     // juegos con puntos (Pet Rescue): estrellas por los umbrales de puntos del nivel
     if (spec.starScores) { const sc = P.score || 0; return sc >= spec.starScores[2] ? 3 : sc >= spec.starScores[1] ? 2 : 1; }
-    const r = P.moves / spec.moves;
+    const r = playS.timeTotal ? E.timeLeft() / playS.timeTotal : P.moves / spec.moves;
     return r >= 0.3 ? 3 : r >= 0.12 ? 2 : 1;
   }
   function win() {
     const n = playS.n, P = playS.P;
     const st = starsFor(P, playS.spec);
-    if (playS.challenge) { // el desafío no avanza el mapa: da su premio y vuelve
-      E.save.weekDone = playS.challenge.week;
+    if (playS.challenge) { // el desafío o el nivel de fiesta no avanzan el mapa: dan su premio y vuelven
+      const ch = playS.challenge;
+      if (ch.kind === 'fiesta') E.save.fiestaDone = ch.key; else E.save.weekDone = ch.week;
       E.save.streak = (E.save.streak || 0) + 1;
       const got = giveRandomStart(3);
       playS.challenge = null;
       E.persist();
       E.sfx('win'); E.confetti();
-      rewardPopup('¡Desafío superado!', 'Te llevas 3 potenciadores para empezar los niveles. ¡El lunes habrá otro!', got.map((b) => b.icon), goMap, '🏅');
+      if (ch.kind === 'fiesta') rewardPopup('¡Nivel especial superado!', ch.name + ' Te llevas 3 potenciadores para empezar.', got.map((b) => b.icon), goMap, ch.emoji);
+      else rewardPopup('¡Desafío superado!', 'Te llevas 3 potenciadores para empezar los niveles. ¡El lunes habrá otro!', got.map((b) => b.icon), goMap, '🏅');
       return;
     }
     E.save.chest = (E.save.chest || 0) + Math.max(0, st - (E.save.stars[n] || 0)); // solo cuentan las estrellas nuevas
@@ -1450,7 +1621,7 @@ const E = {};
     // arrancó bien: si era una versión descargada, se confirma (ver actualizaciones en MainActivity)
     setTimeout(() => { window.__arrancado = true; try { if (window.AndroidUpdate) window.AndroidUpdate.ok(); } catch (e) { /* sin Android */ } }, 3000);
     setTimeout(() => E.sendData('arranque', true), 15000);
-    if (!resumed) { E.after(0.8, () => { E.prefetch(E.save.level); if (!E.weekly().done) E.prefetchLater(E.weekly().n); }); E.after(1, () => { if (E.screen === mapS && !E.popup) dailyWheel(); }); }
+    if (!resumed) { E.after(0.8, () => { E.prefetch(E.save.level); if (!E.weekly().done) E.prefetchLater(E.weekly().n); const fi = E.fiesta(); if (fi && !fi.done) E.prefetchLater(fi.n); }); E.after(1, () => { if (E.screen === mapS && !E.popup) fiestaGreeting(() => dailyWheel()); }); }
     requestAnimationFrame(frame);
   };
 })();

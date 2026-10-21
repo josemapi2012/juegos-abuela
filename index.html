@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Los juegos de la abuela</title>
+<style>
+  /* Página para la familia: jugar en el ordenador los mismos niveles que la abuela y compararse con ella */
+  :root { --bg1: #ffd9ec; --bg2: #b9a7ff; --card: #ffffff; --ink: #3d2b6b; --soft: #6b5a9a; }
+  @media (prefers-color-scheme: dark) { :root { --bg1: #2a2140; --bg2: #3b2f66; --card: #1f1a33; --ink: #f1ecff; --soft: #c5b8f0; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; font-family: system-ui, sans-serif; color: var(--ink); background: linear-gradient(160deg, var(--bg1), var(--bg2)); }
+  header { text-align: center; padding: 32px 16px 8px; }
+  h1 { margin: 0; font-size: clamp(28px, 5vw, 44px); }
+  header p { margin: 8px 0 0; color: var(--soft); font-size: 18px; }
+  main { max-width: 980px; margin: 0 auto; padding: 16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+  a.juego { display: flex; flex-direction: column; align-items: center; gap: 8px; text-decoration: none; color: inherit; background: var(--card); border-radius: 22px; padding: 22px 16px; box-shadow: 0 6px 0 rgba(0,0,0,0.12); transition: transform .1s; }
+  a.juego:hover { transform: translateY(-3px); }
+  .ico { font-size: 64px; line-height: 1; }
+  .nombre { font-size: 22px; font-weight: 800; }
+  .estilo { font-size: 14px; color: var(--soft); }
+  .marcador { width: 100%; margin-top: 8px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 15px; text-align: center; }
+  .marcador div { background: rgba(127,110,200,0.12); border-radius: 12px; padding: 8px 4px; }
+  .marcador b { display: block; font-size: 22px; }
+  footer { text-align: center; color: var(--soft); font-size: 14px; padding: 20px 16px 32px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>👵 Los juegos de la abuela</h1>
+  <p>Juega los mismos niveles que ella. ¿Quién llega más lejos?</p>
+</header>
+<main id="lista"></main>
+<footer id="pie">Tu partida se guarda en este navegador.</footer>
+<script>
+  const JUEGOS = [
+    { id: 'cubos', nombre: 'Cubos Locos', ico: '🧸', estilo: 'como Toy Blast' },
+    { id: 'dulces', nombre: 'Dulces', ico: '🍬', estilo: 'como Candy Crush' },
+    { id: 'mascotas', nombre: 'Rescate Animal', ico: '🐶', estilo: 'como Pet Rescue' },
+    { id: 'burbujas', nombre: 'Burbujas Panda', ico: '🐼', estilo: 'como Panda Pop' },
+  ];
+  const mio = (id) => { try { const s = JSON.parse(localStorage.getItem('abuela_' + id) || '{}'); return { nivel: s.level || 1, estrellas: Object.values(s.stars || {}).reduce((a, b) => a + b, 0) }; } catch (e) { return { nivel: 1, estrellas: 0 }; } };
+  function pintar(m) {
+    document.getElementById('lista').innerHTML = JUEGOS.map((j) => {
+      const a = (m && m.juegos && m.juegos[j.id]) || null, t = mio(j.id);
+      return `<a class="juego" href="juegos/${j.id}/index.html"><span class="ico">${j.ico}</span><span class="nombre">${j.nombre}</span><span class="estilo">${j.estilo}</span>
+        <span class="marcador"><div>Abuela<b>${a ? 'Nivel ' + a.nivel : '—'}</b>${a ? a.estrellas + ' ⭐' : ''}</div><div>Tú<b>Nivel ${t.nivel}</b>${t.estrellas} ⭐</div></span></a>`;
+    }).join('');
+    if (m && m.actualizado) document.getElementById('pie').textContent = 'Marcador de la abuela actualizado el ' + new Date(m.actualizado).toLocaleString('es-ES', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) + ' · Tu partida se guarda en este navegador.';
+  }
+  pintar(null);
+  fetch('marcador.json?t=' + Date.now()).then((r) => r.json()).then(pintar).catch(() => {});
+</script>
+</body>
+</html>

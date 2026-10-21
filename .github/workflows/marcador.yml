@@ -1,0 +1,22 @@
+name: Marcador de la abuela
+on:
+  schedule:
+    - cron: '23 */2 * * *'
+  workflow_dispatch: {}
+permissions:
+  contents: write
+jobs:
+  marcador:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Leer los datos de la tablet (solo nivel y estrellas)
+        env:
+          DATOS_TOKEN: ${{ secrets.DATOS_TOKEN }}
+        run: python3 .github/marcador.py
+      - name: Publicar el marcador
+        run: |
+          git config user.name "marcador"
+          git config user.email "marcador@users.noreply.github.com"
+          git add marcador.json
+          git diff --cached --quiet || (git commit -m "Marcador" && git push)

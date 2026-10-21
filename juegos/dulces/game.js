@@ -197,6 +197,7 @@ const GAME = {
     if (t.myst) g.drawImage(E.emojiSprite('❓', s * 0.5), -s * 0.25, -s * 0.25, s * 0.5, s * 0.5);
     if (t.key) g.drawImage(E.emojiSprite('🔑', s * 0.48), -s * 0.24, -s * 0.24, s * 0.48, s * 0.48);
     if (t.plus5) { g.beginPath(); g.arc(0, 0, s * 0.26, 0, 7); g.fillStyle = '#2bb24c'; g.fill(); E.text(g, '+5', 0, 1, s * 0.27, '#fff', { stroke: false }); }
+    if (t.clock) { const cs = s * 0.5; g.drawImage(E.emojiSprite('⏱️', cs), -cs / 2, -cs / 2, cs, cs); }
     if (t.frog) { // rana: se come los caramelos de su color; llena, se lanza donde toques
       const fs = s * 0.66;
       if (t.fillK >= 1) { const p = 1 + Math.sin(E.t * 8) * 0.08; g.scale(p, p); }
@@ -400,6 +401,7 @@ const GAME = {
     K.collect('color', t.color, r, c, delay);
     if (S.frogFull && t.color === S.frogColor) S.frogBelly++;
     if (t.plus5) K.extraMoves(5, r, c, delay);
+    if (t.clock) K.extraTime(5, r, c, delay);
     if (t.key) sugarKey(S, K, delay);
     if (t.myst) { const m = mysteryOf(S); S.grid[r][c] = m; K.created(m, r, c, delay + 0.15); if (m.timer) K.fx({ type: 'boom', r, c, rad: 0.6, delay }); }
     if (t.sp) activate(S, t, r, c, delay + 0.1, K);
@@ -578,6 +580,7 @@ const GAME = {
     if (S.keyRate && S.rand() < S.keyRate && countKind(S, 'slock') && countKey(S) < 2) { const t = newCandy(S); t.key = true; return t; }
     if (S.chamRate && S.rand() < S.chamRate) { const t = newCandy(S); t.cham = (t.color + 1 + S.rand.int(S.colors - 1)) % S.colors; return t; }
     if (S.mystRate && S.rand() < S.mystRate) { const t = newCandy(S); t.myst = true; return t; }
+    if (S.clockRate && S.rand() < S.clockRate && countFlag(S, 'clock') < 2) { const t = newCandy(S); t.clock = true; return t; } // contrarreloj
     if (S.plusRate && S.rand() < S.plusRate && !countFlag(S, 'plus5')) { const t = newCandy(S); t.plus5 = true; return t; }
     if (S.licRate && S.rand() < S.licRate) return { id: uid++, kind: 'lic' };
     if (S.fallIceRate && S.rand() < S.fallIceRate) return { id: uid++, kind: 'ice', hp: 1, fall: true }; // glaseado que cae
@@ -855,7 +858,7 @@ const GAME = {
   function buildState(spec, seed) {
     const S = { R: spec.R, C: spec.C, top: spec.top.slice(), colors: spec.colors, rand: E.rng(seed), ingLeft: spec.ings, licRate: spec.licRate || 0, hole: spec.hole, spawn: spec.spawn, portal: spec.portal, spRate: spec.spRate || 0, spKind: spec.spKind, turn: 0,
       cannon: spec.cannon, belt: spec.belt, keyRate: spec.keyRate || 0, chamRate: spec.chamRate || 0, mystRate: spec.mystRate || 0, plusRate: spec.plusRate || 0,
-      frogFull: spec.frogFull || 0, frogBelly: 0, frogColor: spec.frogColor, wall: spec.wall, fallIceRate: spec.fallIceRate || 0 };
+      frogFull: spec.frogFull || 0, frogBelly: 0, frogColor: spec.frogColor, wall: spec.wall, fallIceRate: spec.fallIceRate || 0, clockRate: spec.time ? 0.03 : 0 };
     S.grid = spec.cells.map((row) => row.map((d) => (d ? Object.assign({ id: uid++ }, d) : null)));
     S.jelly = spec.jelly.map((row) => row.slice());
     return S;
@@ -867,7 +870,7 @@ const GAME = {
     T.top = S.top;
     return T;
   }
-  const nullK = { begin() {}, end() {}, remove() {}, created() {}, fx() {}, hurt() {}, spawn() {}, jelly() {}, shuffle() {}, sound() {}, combo() {}, collect() {}, bombOut() {}, extraMoves() {}, frogMove() {} };
+  const nullK = { begin() {}, end() {}, remove() {}, created() {}, fx() {}, hurt() {}, spawn() {}, jelly() {}, shuffle() {}, sound() {}, combo() {}, collect() {}, bombOut() {}, extraMoves() {}, extraTime() {}, frogMove() {} };
   function needCounter(spec) {
     const need = { color: {}, jelly: 0, ice: 0, ing: 0, striped: 0, slock: 0 };
     spec.goals.forEach((gl) => { if (gl.type === 'color') need.color[gl.key] = gl.count; else need[gl.type] = gl.count; });
@@ -950,6 +953,11 @@ const GAME = {
     // si aun así el bot va muy sobrado (p. ej. gelatina, que no se puede ampliar), se recortan movimientos para que siga siendo un reto
     const cap = target ? Math.ceil(spec.botMoves * 1.35) + 2 : 99;
     spec.moves = E.clamp(Math.max(Math.min(target, cap), Math.ceil(spec.botMoves * 1.15) + 1), n < 5 ? 10 : 15, 50);
+    // contrarreloj (Candy Crush, "Timed"): de vez en cuando, tiempo en vez de movimientos; ~7 s por movimiento que da el nivel
+    if (n >= 39 && n % 13 === 0 && n % 10 !== 0) {
+      spec.time = E.clamp(Math.round((spec.moves * 7) / 10) * 10, 90, 360);
+      spec.text = (n === 39 ? '¡Contrarreloj! Cumple los objetivos antes de que se acabe el tiempo. Los caramelos con reloj ⏱️ dan 5 segundos más.' : spec.text);
+    }
     cache.set(n, spec);
     return spec;
   }
@@ -1212,6 +1220,7 @@ const GAME = {
   }
 
   GAME.dynamicDifficulty = true; // como Candy Crush
+  GAME.usesDrag = true;
   // potenciadores de inicio (Candy Crush: rayado, envuelto y bomba de color) y premio de la racha de victorias
   // colección propia del juego (logros y álbum)
   GAME.collection = { type: 'ing', label: 'Ingredientes bajados', icon: '🍒' };
@@ -1264,6 +1273,7 @@ const GAME = {
       sound(size, loop) { building.sound = { size, loop }; },
       combo(loop) { building.loop = loop; },
       shuffle(SS) { K.begin(); building.shuffle = true; K.end(SS); },
+      extraTime(sec, r, c, delay) { E.after(delay + 0.1, () => E.addTime(sec, cx(c), cy(r) - 20)); },
       extraMoves(n, r, c, delay) { E.after(delay + 0.1, () => { P.moves += n; E.floatText(cx(c), cy(r) - 20, '+' + n + ' movimientos', '#2bb24c', 38); E.sfx('special'); }); },
       frogMove(t, r, c) { building.frog = { t, r, c }; building.dur = Math.max(building.dur, 0.45); },
       bombOut(r, c) { E.after(0.1, () => { E.floatText(cx(c), cy(r) - 30, '¡BUM!', '#ff5050', 40); E.sfx('bomb'); E.shake(0.5); }); },
@@ -1350,7 +1360,7 @@ const GAME = {
     P.move = function (x, y) {
       if (!drag || P.busy) return;
       const dx = x - drag.x, dy = y - drag.y;
-      if (Math.max(Math.abs(dx), Math.abs(dy)) > ts * 0.35) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) > ts * E.dragK()) { // cuánto hay que deslizar (Ajustes)
         const [r, c] = drag.rc;
         const b = Math.abs(dx) > Math.abs(dy) ? [r, c + Math.sign(dx)] : [r + Math.sign(dy), c];
         drag = null;
@@ -1413,6 +1423,7 @@ const GAME = {
       if (t && t.myst) return 'Caramelo misterioso: puede traer algo bueno... o malo';
       if (t && t.key) return 'Llave de azúcar: combínala para abrir los candados de azúcar';
       if (t && t.plus5) return 'Combínalo y ganarás 5 movimientos';
+      if (t && t.clock) return 'Caramelo de reloj: combínalo y tendrás 5 segundos más';
       if (t && t.kind === 'candy' && t.sp) return t.sp === 'w' ? 'Envuelto: explota dos veces a su alrededor' : t.sp === 'f' ? 'Pez: va a por lo que te falta' : 'Rayado: limpia su fila o su columna';
       const K2 = { bomb: 'Bomba de color: quita todos los caramelos de un color', lic: 'Regaliz: se rompe haciendo líneas a su lado', ing: 'Ingrediente: bájalo hasta abajo del todo',
         mixer: 'Batidora mágica: llena el tablero de glaseado; rómpela haciendo líneas a su lado', popcorn: 'Palomitas: revientan con caramelos especiales', skull: 'Calavera ácida: rómpela combinando a su lado',

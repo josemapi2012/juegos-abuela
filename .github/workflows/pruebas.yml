@@ -1,0 +1,23 @@
+name: Pruebas con los robots (300 niveles por juego)
+on:
+  push:
+    paths: ['version.json']
+  workflow_dispatch: {}
+jobs:
+  robots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Preparar los juegos
+        run: |
+          for j in cubos dulces mascotas burbujas; do mkdir -p pruebas/build/$j/assets; cp juegos/$j/* pruebas/build/$j/assets/; cp pruebas/tools/robots/robo*.js pruebas/build/; done
+      - name: Jugar los niveles 1–300 de cada juego
+        env:
+          CHROME: /usr/bin/google-chrome
+        run: node pruebas/tools/robots/pasada.mjs 1 300
+      - name: Revisar
+        run: python3 pruebas/tools/robots/informe.py && python3 pruebas/tools/robots/comprobar.py
