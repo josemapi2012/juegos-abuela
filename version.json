@@ -1,11 +1,11 @@
 {
- "version": 1,
+ "version": 2,
  "nativo": 1,
  "fecha": "2026-10-21 22:42",
  "juegos": {
   "cubos": {
    "index.html": "3a5b671fe7c625fffa1de67107bece540296b0e29714eac741a5c30dd570b2cd",
-   "game.js": "da3d61d189900936a291d06a5accbd7d4c69cd2e4e364e4837c0d48d69a0c43b",
+   "game.js": "bcfa59ac09b5cd1ebde09f70cbb6b520ddf7ff8ee13c65cff99e2d0046f96328",
    "engine.js": "47edadad7cf7edd2679e759c008dcaee4ac8e8e8d69613337bee430660fda2ce"
   },
   "dulces": {
