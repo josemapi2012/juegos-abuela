@@ -1156,6 +1156,29 @@ const E = {};
       back() { E.closePopup(); },
     });
   }
+  // ---------------------------------------------------------------- datos para arreglar cosas desde casa
+  // El estado del juego (nivel, registro de partidas, errores) va a un repositorio privado de GitHub (./datos.sh lo lee).
+  let lastSend = 0;
+  E.sendData = function (motivo, force) {
+    try {
+      if (!window.AndroidData || !window.AndroidData.ok() || E.fast) return;
+      const now = Date.now();
+      if (!force && now - lastSend < 120000) return;
+      lastSend = now;
+      const ver = window.AndroidUpdate ? window.AndroidUpdate.version() : 0;
+      window.AndroidData.send(JSON.stringify({ juego: GAME.id, enviado: new Date().toISOString(), motivo, version: ver, pantalla: E.W + 'x' + E.H, save: E.save }));
+    } catch (e) { /* sin envío */ }
+  };
+  // errores que ocurran jugando: se guardan (los 30 últimos) para verlos desde casa
+  window.addEventListener('error', (ev) => {
+    if (!window.__arrancado) return;
+    try {
+      const v = window.AndroidUpdate ? window.AndroidUpdate.version() : 0;
+      E.save.errs = (E.save.errs || []).concat([{ t: new Date().toISOString(), v, msg: String(ev.message).slice(0, 200), at: (ev.filename || '').split('/').pop() + ':' + ev.lineno, nivel: E.screen === playS ? playS.n : null }]).slice(-30);
+      E.persist();
+    } catch (e) { /* nada */ }
+  });
+
   // ---------------------------------------------------------------- registro de partidas
   // Cada intento de nivel: para ver con datos reales qué le cuesta a la abuela (tools/registro.sh lo lee de la tablet).
   // r: g ganado, p perdido, s salió; m movimientos usados de mt; s segundos jugando (sin pausas); st estrellas; b ayudas
@@ -1170,6 +1193,7 @@ const E = {};
     if (playS.challenge) e.ch = 1;
     if (r === 'p') e.left = P.goals.reduce((a, g) => a + Math.max(0, g.left), 0);
     E.save.log = (E.save.log || []).concat([e]).slice(-1500);
+    setTimeout(() => { E.persist(); E.sendData('nivel ' + e.n); }, 1000);
   }
   E.logAttempt = logAttempt;
   // Repite deprisa los toques apuntados de una partida a medias
@@ -1325,7 +1349,7 @@ const E = {};
   cv.addEventListener('pointercancel', (ev) => endPointer(ev, true));
 
   // Pausa automática al salir de la app o apagar la pantalla
-  window.onAndroidPause = function () { if (E.screen === playS && playS.state === 'playing' && !E.popup) openPause(); return 'ok'; };
+  window.onAndroidPause = function () { if (E.screen === playS && playS.state === 'playing' && !E.popup) openPause(); E.sendData('salir', true); return 'ok'; };
   document.addEventListener('visibilitychange', () => { if (document.hidden) window.onAndroidPause(); });
   // Botón "atrás" de Android: devuelve 'exit' si hay que salir de la app.
   window.onAndroidBack = function () {
@@ -1425,6 +1449,7 @@ const E = {};
     }
     // arrancó bien: si era una versión descargada, se confirma (ver actualizaciones en MainActivity)
     setTimeout(() => { window.__arrancado = true; try { if (window.AndroidUpdate) window.AndroidUpdate.ok(); } catch (e) { /* sin Android */ } }, 3000);
+    setTimeout(() => E.sendData('arranque', true), 15000);
     if (!resumed) { E.after(0.8, () => { E.prefetch(E.save.level); if (!E.weekly().done) E.prefetchLater(E.weekly().n); }); E.after(1, () => { if (E.screen === mapS && !E.popup) dailyWheel(); }); }
     requestAnimationFrame(frame);
   };
