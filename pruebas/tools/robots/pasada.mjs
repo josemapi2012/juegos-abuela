@@ -19,7 +19,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', join(ROOT, 'build')], { stdio: 'ignore' });
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${DBG}`, `--user-data-dir=${mkdtempSync(join(tmpdir(), 'pasada-'))}`,
-  '--window-size=600,960', ...(process.env.CI ? ['--no-sandbox'] : []), '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows', 'about:blank'], { stdio: 'ignore' });
+  '--window-size=600,960', ...(process.env.CI ? ['--no-sandbox', '--disable-dev-shm-usage'] : []), '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows', 'about:blank'], { stdio: 'ignore' });
 const fin = () => { try { chrome.kill(); } catch (e) {} try { server.kill(); } catch (e) {} };
 process.on('exit', fin); process.on('SIGINT', () => { fin(); process.exit(1); });
 

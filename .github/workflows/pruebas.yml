@@ -5,19 +5,24 @@ on:
   workflow_dispatch: {}
 jobs:
   robots:
+    # un trabajo por juego: los cuatro a la vez en un mismo Chrome se quedaban sin memoria
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        juego: [cubos, dulces, mascotas, burbujas]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Preparar los juegos
+      - name: Preparar el juego
         run: |
-          for j in cubos dulces mascotas burbujas; do mkdir -p pruebas/build/$j/assets; cp juegos/$j/* pruebas/build/$j/assets/; cp pruebas/tools/robots/robo*.js pruebas/build/; done
-      - name: Jugar los niveles 1–300 de cada juego
+          j=${{ matrix.juego }}; mkdir -p pruebas/build/$j/assets; cp juegos/$j/* pruebas/build/$j/assets/; cp pruebas/tools/robots/robo*.js pruebas/build/
+      - name: Jugar los niveles 1–300
         env:
           CHROME: /usr/bin/google-chrome
-        run: node pruebas/tools/robots/pasada.mjs 1 300
+        run: node pruebas/tools/robots/pasada.mjs 1 300 ${{ matrix.juego }}
       - name: Revisar
         run: python3 pruebas/tools/robots/informe.py && python3 pruebas/tools/robots/comprobar.py
