@@ -1,4 +1,3 @@
-esto rompe el juego (
 'use strict';
 // Cubos: juego de tocar grupos de cubos del mismo color (estilo "blast").
 
