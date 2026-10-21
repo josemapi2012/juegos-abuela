@@ -397,7 +397,8 @@ const E = {};
     const raw = (native && native.get(KEY)) || localStorage.getItem(KEY);
     if (raw) Object.assign(E.save, JSON.parse(raw));
   } catch (e) { /* sin datos guardados */ }
-  E.save.inv = E.save.inv || {}; E.save.streak = E.save.streak || 0; E.save.chest = E.save.chest || 0;
+  E.save.inv = E.save.inv || {};
+  if (!E.save.binv) { E.save.binv = {}; for (const b of GAME.boosters || []) E.save.binv[b.id] = 3; } E.save.streak = E.save.streak || 0; E.save.chest = E.save.chest || 0;
   E.save.stats = Object.assign({ wins: 0, goals: {}, days: {}, bestStreak: 0 }, E.save.stats || {});
   E.save.ach = E.save.ach || {};
   E.today = () => { const d = new Date(); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); };
@@ -640,10 +641,12 @@ const E = {};
   };
   // lo que da la racha: 1 victoria seguida, 2 y 3 o más
   const streakBonus = () => { const L = GAME.streakBonus || []; const k = Math.min(E.save.streak || 0, L.length); return k ? L[k - 1].slice() : []; };
-  const startDef = (id) => (GAME.startBoosters || []).find((b) => b.id === id) || { icon: '⭐', name: id };
+  // los de dentro del nivel van con 'b:' delante (pueden llamarse igual que uno de inicio)
+  const startDef = (id) => id.startsWith('b:') ? (GAME.boosters || []).find((b) => 'b:' + b.id === id) || { icon: '⭐' } : (GAME.startBoosters || []).find((b) => b.id === id) || { icon: '⭐', name: id };
+  const giveItem = (id) => { if (id.startsWith('b:')) E.save.binv[id.slice(2)] = (E.save.binv[id.slice(2)] || 0) + 1; else E.save.inv[id] = (E.save.inv[id] || 0) + 1; };
   function giveRandomStart(k) {
-    const L = GAME.startBoosters || []; const got = [];
-    for (let i = 0; i < k && L.length; i++) { const b = L[(Math.random() * L.length) | 0]; E.save.inv[b.id] = (E.save.inv[b.id] || 0) + 1; got.push(b); }
+    const L = (GAME.startBoosters || []).map((b) => b.id).concat((GAME.boosters || []).map((b) => 'b:' + b.id)); const got = [];
+    for (let i = 0; i < k && L.length; i++) { const id = L[(Math.random() * L.length) | 0]; giveItem(id); got.push(startDef(id)); }
     E.persist();
     return got;
   }
@@ -716,8 +719,9 @@ const E = {};
   function dailyWheel(then) {
     const SB = GAME.startBoosters || [];
     if (!SB.length || E.save.gift === E.today()) { if (then) then(); return; }
-    const ids = SB.map((b) => b.id);
-    const segs = [[ids[0]], [ids[1]], [ids[2]], [ids[0], ids[1]], [ids[1], ids[2]], [ids[0], ids[1], ids[2]]];
+    const ids = SB.map((b) => b.id), bi = (GAME.boosters || []).map((b) => 'b:' + b.id);
+    const bk = (i) => bi[i % bi.length];
+    const segs = [[ids[0]], [bk(0)], [ids[1]], [bk(1), bk(2)], [ids[2]], [ids[0], bk(bi.length - 1), ids[1]]];
     const cols = ['#ff7a7a', '#ffd23f', '#7ad7ff', '#9be37b', '#d59bff', '#ffb366'];
     const st = { rot: 0, spinning: false, done: false, prize: null };
     const finish = () => E.closePopup(then);
@@ -748,7 +752,7 @@ const E = {};
               E.sfx('magic');
               E.tween(st, { rot: target }, 3.2, { ease: (t) => 1 - Math.pow(1 - t, 3), done: () => {
                 st.done = true; st.prize = segs[k];
-                for (const id of segs[k]) E.save.inv[id] = (E.save.inv[id] || 0) + 1;
+                for (const id of segs[k]) giveItem(id);
                 E.save.gift = E.today(); E.persist();
                 E.sfx('win'); E.confetti(); E.say('¡Te ha tocado un regalo!');
               } });
@@ -770,8 +774,15 @@ const E = {};
     openPreLevel(W2.n, true);
   };
   // ---------------------------------------------------------------- fechas especiales
-  // Su cumpleaños y su santo se ponen aquí (mes, día) y llegan por ./publicar.sh
-  E.FECHAS = { cumple: null, santo: null };
+  // Su cumpleaños, su santo, visitas… vienen de un calendario de Google: GitHub lo lee cada 6 horas
+  // y publica fechas.json; el juego lo descarga al abrirse y lo guarda para cuando no haya wifi.
+  E.FECHAS_URL = 'https://josemapi2012.github.io/juegos-abuela/fechas.json';
+  E.loadCalendar = function () {
+    if (!window.fetch || location.protocol === 'http:') return; // en los robots de prueba, no
+    fetch(E.FECHAS_URL + '?t=' + Date.now()).then((r) => (r.ok ? r.json() : null)).then((j) => {
+      if (j && Array.isArray(j.dias) && JSON.stringify(j.dias) !== JSON.stringify(E.save.cal)) { E.save.cal = j.dias; E.persist(); }
+    }).catch(() => {});
+  };
   function easter(y) { // domingo de Pascua (algoritmo de Gauss/Meeus)
     const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3);
     const h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
@@ -781,9 +792,9 @@ const E = {};
   E.specialDay = function (date) {
     const d = date || new Date(), M = d.getMonth() + 1, D = d.getDate(), Y = d.getFullYear();
     const same = (m, dd) => M === m && D === dd;
-    const F = E.FECHAS;
-    if (F.cumple && same(F.cumple[0], F.cumple[1])) return { id: 'cumple', name: '¡Feliz cumpleaños, abuela!', emoji: '🎂' };
-    if (F.santo && same(F.santo[0], F.santo[1])) return { id: 'santo', name: '¡Feliz santo, abuela!', emoji: '💐' };
+    const iso = Y + '-' + String(M).padStart(2, '0') + '-' + String(D).padStart(2, '0');
+    const c = (E.save.cal || []).find((x) => x.fecha === iso);
+    if (c) return { id: 'cal', name: c.texto, emoji: c.emoji || '🎉', nota: c.nota };
     if (M === 12 && D >= 24 && D <= 26) return { id: 'navidad', name: '¡Feliz Navidad!', emoji: '🎄' };
     if (same(12, 31)) return { id: 'nochevieja', name: '¡Feliz Nochevieja!', emoji: '🥂' };
     if (same(1, 1)) return { id: 'anonuevo', name: '¡Feliz Año Nuevo!', emoji: '🎆' };
@@ -806,7 +817,7 @@ const E = {};
     if (!f || f.greeted) { if (then) then(); return; }
     E.save.fiestaGreet = f.key;
     const got = giveRandomStart(2);
-    rewardPopup(f.name, 'Hoy tienes un regalo y un nivel especial en el mapa.', got.map((b) => b.icon), then, f.emoji);
+    rewardPopup(f.name, (f.nota ? f.nota + ' ' : '') + 'Hoy tienes un regalo y un nivel especial en el mapa.', got.map((b) => b.icon), then, f.emoji);
   }
   E.openFiesta = function () {
     const f = E.fiesta();
@@ -893,7 +904,6 @@ const E = {};
     const chosen = new Set();
     const SB = GAME.startBoosters || [];
     // si un nivel se resiste (6 intentos sin superarlo), sus potenciadores de inicio salen gratis y ya marcados
-    const HELP_AT = 6;
     const help = !challenge && ((E.save.fails && E.save.fails[n]) || 0) >= HELP_AT;
     if (help) SB.forEach((b) => chosen.add(b.id));
     if (spec.text) E.say(spec.text);
@@ -919,7 +929,7 @@ const E = {};
           yy += 50;
         }
         if (help) {
-          E.text(g, '💪 ¡Este nivel se resiste! Hoy los potenciadores son gratis', E.W / 2, yy + 12, 22, '#2a8a2a', { stroke: false });
+          E.text(g, '💪 ¡Este nivel se resiste! Hoy todos los potenciadores son gratis', E.W / 2, yy + 12, 22, '#2a8a2a', { stroke: false });
           yy += 46;
         }
         if (SB.length) {
@@ -1238,33 +1248,47 @@ const E = {};
     });
     items.forEach((b, i) => {
       const x = mx(gap + (i + 1) * (bw + gap));
-      const active = playS.booster === b.id;
+      const active = playS.booster === b.id, have = boosterLeft(b.id);
       E.button('b_' + b.id, x, by, bw, bw, '', {
-        color: active ? '#ffb020' : '#5cc24a', r: 24,
+        color: active ? '#ffb020' : have ? '#5cc24a' : '#9aa3ad', r: 24,
         draw: (gg, xx, yy, w, h) => {
           E.emoji(gg, b.icon, xx + w / 2, yy + h / 2, w * 0.62);
           gg.beginPath(); gg.arc(xx + w - 12, yy + h - 8, 17, 0, 7);
           gg.fillStyle = '#fff'; gg.fill();
-          E.text(gg, '∞', xx + w - 12, yy + h - 9, 26, '#2a7a2a', { stroke: false });
+          E.text(gg, have === Infinity ? '∞' : String(have), xx + w - 12, yy + h - 9, have === Infinity ? 26 : 22, have ? '#2a7a2a' : '#c0392b', { stroke: false });
         },
         cb: () => useBooster(b),
       });
     });
   }
+  // dentro del nivel se gastan; si el nivel se resiste (6 intentos) son ilimitados en ese nivel
+  const HELP_AT = 6;
+  const levelHelp = (n) => !playS.challenge && ((E.save.fails && E.save.fails[n]) || 0) >= HELP_AT;
+  function boosterLeft(id) { return levelHelp(playS.n) ? Infinity : E.save.binv[id] || 0; }
+  function spendBooster(id) {
+    if (playS.replaying || boosterLeft(id) === Infinity) return; // al reanudar ya estaba gastado
+    E.save.binv[id] = Math.max(0, (E.save.binv[id] || 0) - 1); E.persist();
+  }
   function useBooster(b) {
     const P = playS.P;
     if (playS.state !== 'playing' || P.busy) return;
+    if (!playS.replaying && playS.booster !== b.id && !boosterLeft(b.id)) {
+      if (!playS.replaying) { E.sfx('click'); E.floatText(E.W / 2, E.H - 260, 'No te quedan. Salen en la ruleta, el cofre y las misiones', '#fff', 26); }
+      return;
+    }
     playS.idle = 0;
     journalAdd(['b', b.id]);
     playS.uses++;
     if (b.target) {
       playS.booster = playS.booster === b.id ? null : b.id;
     } else {
+      spendBooster(b.id);
       P.booster(b.id);
     }
   }
-  E.takeBooster = function () { const b = playS.booster; playS.booster = null; return b; };
+  E.takeBooster = function () { const b = playS.booster; playS.booster = null; if (b) spendBooster(b); return b; };
   E.activeBooster = () => playS.booster;
+  E.useBooster = (id) => useBooster(GAME.boosters.find((b) => b.id === id)); // para las pruebas
 
   function openPause() {
     E.openPopup({
@@ -1522,7 +1546,8 @@ const E = {};
 
   // Pausa automática al salir de la app o apagar la pantalla
   window.onAndroidPause = function () { if (E.screen === playS && playS.state === 'playing' && !E.popup) openPause(); E.sendData('salir', true); return 'ok'; };
-  document.addEventListener('visibilitychange', () => { if (document.hidden) window.onAndroidPause(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) window.onAndroidPause(); else E.loadCalendar(); });
+  E.loadCalendar();
   // Botón "atrás" de Android: devuelve 'exit' si hay que salir de la app.
   window.onAndroidBack = function () {
     if (E.popup) { if (E.popup.back) E.popup.back(); return 'ok'; }
