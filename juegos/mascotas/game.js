@@ -120,6 +120,7 @@ const GAME = {
     });
   }
   function wireSprite(n, ts) {
+    const skw = E.skin('wire'); if (skw) return E.sprite('wire' + n, ts, ts, (g, w, h) => skw(g, w, h, n));
     return E.sprite('wire' + n, ts, ts, (g, w, h) => {
       g.strokeStyle = 'rgba(70,80,90,0.9)'; g.lineWidth = w * 0.045;
       const step = n >= 2 ? 0.2 : 0.3;
@@ -198,6 +199,7 @@ const GAME = {
     });
   }
   function cageSprite(hp, ts) {
+    const skc = E.skin('cage'); if (skc) return E.sprite('cage' + hp, ts, ts, (g, w, h) => skc(g, w, h, hp));
     return E.sprite('cage' + hp, ts, ts, (g, w, h) => {
       const base = hp >= 2 ? '#8a5a2e' : '#b7793f';
       g.strokeStyle = base; g.lineWidth = w * 0.09; g.lineCap = 'round';
@@ -220,8 +222,9 @@ const GAME = {
       if (t.kind === 'cage' && t.carrier) { const cs = s * 0.5; g.drawImage(E.emojiSprite('🧳', cs), s * 0.5 - cs, s * 0.5 - cs, cs, cs); }
       else if (t.kind === 'cage') g.drawImage(cageSprite(t.vhp != null ? t.vhp : t.hp, ts), -s / 2, -s / 2, s, s);
     } else {
-      const spr = t.kind === 'block' ? blockSprite(t.color, ts) : t.kind === 'black' ? blackSprite(ts) : t.kind === 'cbomb' ? colorBombSprite(t.color, ts)
-        : t.kind === 'lblast' ? lineBlastSprite(t.color, ts) : t.kind === 'roto' || t.kind === 'dblast' ? rotoSprite(t.color, t.dir, ts) : t.kind === 'gdiam' ? glassDiamSprite(ts) : t.kind === 'paint' ? paintSprite(t.color, ts) : t.kind === 'freezer' ? freezerSprite(ts) : t.kind === 'lock' ? lockSprite(ts) : t.kind === 'gkey' ? glassKeySprite(ts) : t.kind === 'fbox' || t.kind === 'ibox' ? boxSprite(t.kind, ts) : t.kind === 'vflower' ? flowerSprite(t.dir, ts) : t.kind === 'wall' ? wallSprite(ts) : glassBombSprite(ts);
+      const skt = E.skin('tile');
+      const spr = (skt && skt(t, ts, COLORS)) || (t.kind === 'block' ? blockSprite(t.color, ts) : t.kind === 'black' ? blackSprite(ts) : t.kind === 'cbomb' ? colorBombSprite(t.color, ts)
+        : t.kind === 'lblast' ? lineBlastSprite(t.color, ts) : t.kind === 'roto' || t.kind === 'dblast' ? rotoSprite(t.color, t.dir, ts) : t.kind === 'gdiam' ? glassDiamSprite(ts) : t.kind === 'paint' ? paintSprite(t.color, ts) : t.kind === 'freezer' ? freezerSprite(ts) : t.kind === 'lock' ? lockSprite(ts) : t.kind === 'gkey' ? glassKeySprite(ts) : t.kind === 'fbox' || t.kind === 'ibox' ? boxSprite(t.kind, ts) : t.kind === 'vflower' ? flowerSprite(t.dir, ts) : t.kind === 'wall' ? wallSprite(ts) : glassBombSprite(ts));
       g.drawImage(spr, -s / 2, -s / 2, s, s);
       if (t.rainbow) { const rs = s * 0.9; g.drawImage(E.emojiSprite('🌈', rs * 0.55), -rs * 0.28, -rs * 0.28, rs * 0.55, rs * 0.55); }
       if (t.mult) { g.fillStyle = '#ffd23f'; g.beginPath(); g.arc(s * 0.3, -s * 0.3, s * 0.18, 0, 7); g.fill(); E.text(g, 'x' + t.mult, s * 0.3, -s * 0.29, s * 0.2, '#7a3b00', { stroke: false }); }
@@ -240,7 +243,7 @@ const GAME = {
   GAME.drawGoalIcon = function (g, gl, x, y, s) {
     if (gl.type === 'pet') g.drawImage(E.emojiSprite(gl.icon || '🐶', s), x - s / 2, y - s / 2, s, s);
     else if (gl.type === 'blocks') g.drawImage(E.emojiSprite('🧱', s), x - s / 2, y - s / 2, s, s);
-    else g.drawImage(blockSprite(gl.key, s), x - s / 2, y - s / 2, s, s);
+    else { const skt = E.skin('tile'); g.drawImage((skt && skt({ kind: 'block', color: gl.key }, s, COLORS)) || blockSprite(gl.key, s), x - s / 2, y - s / 2, s, s); }
   };
 
   // ------------------------------------------------------------ lógica
@@ -1109,10 +1112,14 @@ const GAME = {
     P.draw = function (g) {
       const top = by, bottom = by + V * ts;
       g.save();
-      E.rr(g, bx - 8, top - 8, S.C * ts + 16, V * ts + 16, 18);
-      g.fillStyle = 'rgba(255,255,255,0.85)'; g.fill();
-      E.rr(g, bx - 2, top - 2, S.C * ts + 4, V * ts + 4, 14);
-      g.fillStyle = 'rgba(60,110,70,0.35)'; g.fill();
+      const skb = E.skin('board');
+      if (skb) skb(g, bx, top, S.C * ts, V * ts, ts);
+      else {
+        E.rr(g, bx - 8, top - 8, S.C * ts + 16, V * ts + 16, 18);
+        g.fillStyle = 'rgba(255,255,255,0.85)'; g.fill();
+        E.rr(g, bx - 2, top - 2, S.C * ts + 4, V * ts + 4, 14);
+        g.fillStyle = 'rgba(60,110,70,0.35)'; g.fill();
+      }
       const groundY = cy(S.R - 1) + ts / 2;
       if (groundY <= bottom + 2) {
         g.fillStyle = '#5fb84a';

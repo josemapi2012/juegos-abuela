@@ -66,7 +66,15 @@ const GAME = {
   const shooterY = (S, viewH) => scrollFor(S) + viewH - 52;
 
   // ------------------------------------------------------------ dibujo
+  // imagen del estilo elegido (solo el estilo 'Original', con las imágenes que hay en la tablet)
+  function imgSprite(color, size) {
+    const ski = E.skin('bubbleImg'), nm = ski && ski(color), im = nm && E.img(nm);
+    return im ? E.sprite('ib' + nm, size, size, (g, w, h) => g.drawImage(im, 0, 0, w, h)) : null;
+  }
   function bubbleSprite(color, size) {
+    const isp = imgSprite(color, size); if (isp) return isp;
+    const skb = E.skin('bubble');
+    if (skb && (typeof color === 'number' || color === 'rainbow' || color === 'bomb')) return E.sprite('sbub' + color, size, size, (g, w, h) => skb(g, w, h, color, COLORS));
     return E.sprite('bub' + color, size, size, (g, w, h) => {
       const special = typeof color !== 'number';
       const base = color === 'rainbow' ? '#ffffff' : special ? '#ffe7a8' : COLORS[color];
@@ -117,6 +125,7 @@ const GAME = {
     gspike: ['#ffd23f', '✴️'], gspikeOff: ['#d8cfae', '✴️'],
     smoke: ['#6b6b78', '💨'], fan: ['#c9a06b', ''], bumper: ['#e8e8f0', '🛞'], fairy: ['#ffe9fb', '🧚'], rock: ['#8d7b68', '🪨'], cannon: ['#7a7f8a', ''] };
   function obsSprite(kind, size) {
+    const isp = imgSprite(kind, size); if (isp) return isp;
     return E.sprite('obs' + kind, size, size, (g, w, h) => {
       const [base, ch] = OBS[kind];
       const gr = g.createRadialGradient(w * 0.36, h * 0.32, w * 0.04, w / 2, h / 2, w * 0.5);
@@ -1161,8 +1170,9 @@ const GAME = {
     P.draw = function (g) {
       const size = D * k;
       g.save();
-      E.rr(g, area.x - 2, area.y - 6, area.w + 4, area.h + 8, 18);
-      g.fillStyle = 'rgba(255,255,255,0.25)'; g.fill();
+      const skbd = E.skin('board');
+      if (skbd) skbd(g, area);
+      else { E.rr(g, area.x - 2, area.y - 6, area.w + 4, area.h + 8, 18); g.fillStyle = 'rgba(255,255,255,0.25)'; g.fill(); }
       g.beginPath(); g.rect(area.x - 2, area.y - 6, area.w + 4, area.h + 8); g.clip();
       if (scroll < 2) { g.fillStyle = 'rgba(90,70,200,0.5)'; g.fillRect(area.x, sy(0) - 6, area.w, 6); }
       for (let r = 0; r < S.grid.length; r++) {

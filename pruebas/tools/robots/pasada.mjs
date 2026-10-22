@@ -41,7 +41,7 @@ for (let i = 0; i < 50; i++) { try { await fetch(`http://localhost:${DBG}/json/v
 await sleep(500);
 
 async function jugar(juego) {
-  const t = await (await fetch(`http://localhost:${DBG}/json/new?http://localhost:${PORT}/${juego}/assets/index.html?pasada=${Date.now()}`, { method: 'PUT' })).json();
+  const t = await (await fetch(`http://localhost:${DBG}/json/new?http://localhost:${PORT}/${juego}/assets/index.html?pasada=${Date.now()}${process.env.GFX ? '&gfx=' + process.env.GFX : ''}`, { method: 'PUT' })).json();
   const c = await cdp(t.webSocketDebuggerUrl);
   // misma pantalla que la tablet (600×960 en unidades del juego), si no los tableros altos enseñan menos filas
   await c.send('Emulation.setDeviceMetricsOverride', { width: 600, height: 960, deviceScaleFactor: 1, mobile: false });

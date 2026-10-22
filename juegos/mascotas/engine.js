@@ -84,7 +84,41 @@ const E = {};
 
   // ---------------------------------------------------------------- sprites
   const spriteCache = new Map();
+  // ---------------------------------------------------------------- estilo gráfico
+  // 'baja' (el dibujo sencillo de siempre), 'nueva' (estilo propio) u 'original' (como el juego original).
+  // Cada juego trae sus estilos en skins.js: GAME.skins = { nueva: {...}, original: {...} }; cada clave
+  // sustituye una parte del dibujo y lo que un estilo no trae se dibuja como en 'baja'.
+  const GFX_OFF = ['nueva']; // el patio andaluz queda guardado pero no se ofrece (decisión del 22/10/2026)
+  // un estilo con imágenes (skin.images) solo se ofrece si están en el aparato (van dentro del APK, nunca por internet)
+  E.gfxList = () => ['baja'].concat(Object.keys(GAME.skins || {}).filter((k) => !GFX_OFF.includes(k) && (!GAME.skins[k].images || GAME.skins[k].ready)));
+  const imgs = {};
+  E.img = (name) => imgs[name];
+  function loadSkinImages() {
+    const base = location.protocol === 'file:' ? 'file:///android_asset/privado/' : 'privado/';
+    for (const [k, sk] of Object.entries(GAME.skins || {})) {
+      if (!sk.images) continue;
+      const names = sk.images; let left = names.length, bad = false;
+      for (const n of names) {
+        const im = new Image();
+        im.onload = () => { imgs[n] = im; if (--left === 0 && !bad) { sk.ready = true; if (E.wantGfx === k) E.setGfx(k); } };
+        im.onerror = () => { bad = true; };
+        im.src = base + n + '.png';
+      }
+    }
+  }
+  E.gfx = 'baja';
+  E.skin = (name) => { const sk = GAME.skins && GAME.skins[E.gfx]; return (sk && sk[name]) || null; };
+  let baseTheme = null;
+  E.setGfx = function (v) {
+    if (!E.gfxList().includes(v)) v = 'baja';
+    E.gfx = v;
+    if (!baseTheme) baseTheme = Object.assign({}, GAME.theme);
+    GAME.theme = Object.assign({}, baseTheme, (GAME.skins && GAME.skins[v] && GAME.skins[v].theme) || {});
+    spriteCache.clear();
+    const init = E.skin('init'); if (init) init();
+  };
   E.sprite = function (key, w, h, draw) {
+    key = E.gfx + ':' + key;
     const pw = Math.max(1, Math.ceil(w * E.scale));
     const ph = Math.max(1, Math.ceil(h * E.scale));
     const k = key + '@' + pw + 'x' + ph;
@@ -101,6 +135,9 @@ const E = {};
   };
   E.emojiSprite = function (ch, size) {
     const s = Math.max(8, Math.round(size / 4) * 4);
+    // un estilo gráfico puede cambiar algunos emojis por dibujos propios (p. ej. los especiales del juego)
+    const ske = E.skin('emoji');
+    if (ske && ske[ch]) return E.sprite('emo:' + ch, s, s, ske[ch]);
     return E.sprite('emo:' + ch, s, s, (g, w, h) => {
       g.font = Math.floor(h * 0.8) + 'px "Noto Color Emoji","Apple Color Emoji","Segoe UI Emoji",sans-serif';
       g.textAlign = 'center';
@@ -165,6 +202,7 @@ const E = {};
   };
   E.panel = function (g, x, y, w, h, opt) {
     opt = opt || {};
+    const sk = E.skin('panel'); if (sk) { sk(g, x, y, w, h, opt); return; }
     const r = opt.r || 22;
     // sombra sólida (las sombras difuminadas son lentas en la tablet)
     E.rr(g, x + 2, y + 6, w, h, r);
@@ -206,6 +244,15 @@ const E = {};
     g.save();
     if (opt.alpha != null) g.globalAlpha = opt.alpha;
     const r = opt.r != null ? opt.r : h / 2.4;
+    const skb = E.skin('button');
+    if (skb) {
+      skb(g, x, y, w, h, color, down, r, opt);
+      if (opt.draw) opt.draw(g, x, y + oy, w, h - 6);
+      if (label) E.text(g, label, x + w / 2, y + oy + (h - 6) / 2 + 1, opt.size || h * 0.42, '#fff', { stroke: E.shade(color, -0.5) });
+      g.restore();
+      btns.push({ id, x, y, w, h, cb: opt.cb, sound: opt.sound !== false });
+      return;
+    }
     if (!down) {
       E.rr(g, x + 1, y + 10, w, h - 6, r);
       g.fillStyle = 'rgba(0,0,0,0.18)';
@@ -487,6 +534,7 @@ const E = {};
     }
   };
   function mapBg(g, top) {
+    const sk = E.skin('mapBg'); if (sk) { sk(g, top, NODE_GAP * WORLD); return; }
     // Fondo que cambia de color por "zonas" de 20 niveles
     const th = GAME.theme;
     const zoneH = NODE_GAP * 20;
@@ -519,7 +567,7 @@ const E = {};
     // decoraciones
     const first = Math.max(0, Math.floor((mapS.scroll - E.H * 0.2) / NODE_GAP) - 2);
     const last = Math.floor((mapS.scroll + E.H * 1.2) / NODE_GAP) + 2;
-    for (let i = first; i <= last; i++) {
+    for (let i = first; i <= last && !E.skin('mapNoDecor'); i++) {
       const r = E.rng(i * 7919 + 13);
       for (let k = 0; k < 2; k++) {
         const side = (i + k) % 2 ? 1 : -1;
@@ -529,6 +577,9 @@ const E = {};
       }
     }
     // camino
+    const skp = E.skin('mapPath');
+    if (skp) skp(g, Math.max(1, first), last, (i) => { const p = nodePos(i); return { x: p.x, y: p.y + off }; });
+    else {
     g.lineCap = 'round';
     g.lineWidth = 34;
     g.strokeStyle = th.path || 'rgba(255,255,255,0.55)';
@@ -543,6 +594,7 @@ const E = {};
     g.strokeStyle = 'rgba(255,255,255,0.9)';
     g.stroke();
     g.setLineDash([]);
+    }
     // carteles de los mundos (cada 20 niveles)
     for (let i = Math.max(1, first); i <= last; i++) {
       if ((i - 1) % WORLD !== 0) continue;
@@ -560,6 +612,8 @@ const E = {};
       const cur = i === E.save.level;
       const done = i < E.save.level;
       const r = cur ? 40 + Math.sin(E.t * 4) * 3 : 32;
+      const skn = E.skin('mapNode');
+      if (skn) { skn(g, i, x, y, r, cur, done, E.hardness(i), E.save.stars[i] || 1); continue; }
       g.beginPath(); g.arc(x + 1, y + 5, r, 0, 7);
       g.fillStyle = 'rgba(0,0,0,0.18)'; g.fill();
       g.beginPath(); g.arc(x, y, r, 0, 7);
@@ -582,8 +636,8 @@ const E = {};
       if (cur) E.emoji(g, th.mascot, x - r - 26, y - 6, 54);
     }
     // cabecera
-    g.fillStyle = 'rgba(0,0,0,0.25)';
-    g.fillRect(0, 0, E.W, 86);
+    const skh = E.skin('mapHeader');
+    if (skh) skh(g, E.W, 86); else { g.fillStyle = 'rgba(0,0,0,0.25)'; g.fillRect(0, 0, E.W, 86); }
     E.text(g, GAME.title, 16, 44, 25, '#fff', { align: 'left' });
     // cofre de estrellas y racha
     const cx0 = 246;
@@ -913,7 +967,7 @@ const E = {};
         const w = 520, h = (spec.text ? 600 : 520) + extra, x = (E.W - w) / 2, y = (E.H - h) / 2;
         E.panel(g, x, y, w, h, GAME.theme.panel);
         E.rr(g, x + 60, y - 30, w - 120, 76, 30);
-        g.fillStyle = GAME.theme.accent; g.fill();
+        g.fillStyle = GAME.theme.ribbon || GAME.theme.accent; g.fill();
         g.lineWidth = 5; g.strokeStyle = '#fff'; g.stroke();
         E.text(g, playS.challenge ? (playS.challenge.kind === 'fiesta' ? playS.challenge.emoji + ' Nivel especial' : '🏅 Desafío semanal') : 'Nivel ' + n, E.W / 2, y + 8, playS.challenge ? 36 : 44, '#fff');
         if (E.isHard(n)) E.text(g, E.hardness(n) === 2 ? '💀 ¡Nivel superdifícil! 💀' : '💀 ¡Nivel difícil!', E.W / 2, y + 82, 30, E.hardness(n) === 2 ? '#5b2a86' : '#ff5a5a', { stroke: '#fff', sw: 6 });
@@ -1137,7 +1191,8 @@ const E = {};
   playS.draw = function (g) {
     const P = playS.P, L = playS.layout, th = GAME.theme;
     // fondo
-    const bg = E.sprite('bg' + GAME.id, E.W, E.H, (c, w, h) => {
+    const skbg = E.skin('playBg');
+    const bg = E.sprite('bg' + GAME.id, E.W, E.H, skbg ? (c, w, h) => skbg(c, w, h, L) : (c, w, h) => {
       const gr = c.createLinearGradient(0, 0, 0, h);
       gr.addColorStop(0, th.bg[0]); gr.addColorStop(1, th.bg[1]);
       c.fillStyle = gr; c.fillRect(0, 0, w, h);
@@ -1173,7 +1228,9 @@ const E = {};
   };
   function drawHud(g, P, L) {
     const th = GAME.theme;
-    E.panel(g, 8, 8, E.W - 16, L.hudH - 12, { border: th.hudBorder || '#2e6f8e', top: th.hudTop || '#fff8e6', bottom: th.hudBottom || '#f3dfb5', r: 26 });
+    const skh = E.skin('hud');
+    if (skh) skh(g, E.W, L.hudH);
+    else E.panel(g, 8, 8, E.W - 16, L.hudH - 12, { border: th.hudBorder || '#2e6f8e', top: th.hudTop || '#fff8e6', bottom: th.hudBottom || '#f3dfb5', r: 26 });
     // objetivos
     const gx = 22, gy = 20, gw = 300, gh = L.hudH - 40;
     E.text(g, 'Objetivo', gx + gw / 2, gy + 14, 22, th.hudText || '#7a4b1f', { stroke: false, weight: '800' });
@@ -1208,8 +1265,7 @@ const E = {};
     // movimientos
     const mx = E.W - 170, mw = 150;
     E.text(g, playS.timeTotal ? '⏱ Tiempo' : th.movesLabel || 'Movimientos', mx + mw / 2, 34, 22, th.hudText || '#7a4b1f', { stroke: false, weight: '800' });
-    E.rr(g, mx, 52, mw, 92, 20);
-    g.fillStyle = 'rgba(255,255,255,0.75)'; g.fill();
+    if (!skh) { E.rr(g, mx, 52, mw, 92, 20); g.fillStyle = 'rgba(255,255,255,0.75)'; g.fill(); }
     if (playS.timeTotal) {
       const t = Math.max(0, Math.ceil(E.timeLeft())), lowT = t <= 10;
       E.text(g, Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'), mx + mw / 2, 100, lowT ? 56 + Math.sin(E.t * 8) * 4 : 56, lowT ? '#ff4040' : '#3b6fb6', { stroke: '#fff', sw: 8 });
@@ -1231,27 +1287,33 @@ const E = {};
   }
   function drawBar(g, P, L) {
     const y = E.H - L.barH;
-    g.fillStyle = GAME.theme.bar || 'rgba(30,60,90,0.85)';
-    g.fillRect(0, y, E.W, L.barH);
-    g.fillStyle = 'rgba(255,255,255,0.2)';
-    g.fillRect(0, y, E.W, 4);
+    const skbar = E.skin('bar');
+    if (skbar) skbar(g, y, E.W, L.barH);
+    else {
+      g.fillStyle = GAME.theme.bar || 'rgba(30,60,90,0.85)';
+      g.fillRect(0, y, E.W, L.barH);
+      g.fillStyle = 'rgba(255,255,255,0.2)';
+      g.fillRect(0, y, E.W, 4);
+    }
     const items = GAME.boosters;
     const n = items.length + 1;
     const bw = Math.min(110, (E.W - 20) / n - 10);
     const gap = (E.W - n * bw) / (n + 1);
     const by = y + (L.barH - bw) / 2 - 4;
     const mx = (x0) => (E.save.hand === 'izq' ? E.W - x0 - bw : x0); // mano izquierda: barra al revés
+    const skpz = E.skin('pauseIcon');
     E.button('pause', mx(gap), by, bw, bw, '', {
-      color: '#4a90c2', r: bw / 2,
-      draw: (gg, x, yy, w, h) => E.emoji(gg, '⚙️', x + w / 2, yy + h / 2, w * 0.55),
+      color: GAME.theme.pauseColor || '#4a90c2', r: bw / 2,
+      draw: skpz || ((gg, x, yy, w, h) => E.emoji(gg, '⚙️', x + w / 2, yy + h / 2, w * 0.55)),
       cb: openPause,
     });
     items.forEach((b, i) => {
       const x = mx(gap + (i + 1) * (bw + gap));
       const active = playS.booster === b.id, have = boosterLeft(b.id);
+      const skbb = E.skin('boosterIcon');
       E.button('b_' + b.id, x, by, bw, bw, '', {
         color: active ? '#ffb020' : have ? '#5cc24a' : '#9aa3ad', r: 24,
-        draw: (gg, xx, yy, w, h) => {
+        draw: skbb ? (gg, xx, yy, w, h) => skbb(gg, b, xx, yy, w, h, have, active) : (gg, xx, yy, w, h) => {
           E.emoji(gg, b.icon, xx + w / 2, yy + h / 2, w * 0.62);
           gg.beginPath(); gg.arc(xx + w - 12, yy + h - 8, 17, 0, 7);
           gg.fillStyle = '#fff'; gg.fill();
@@ -1315,6 +1377,8 @@ const E = {};
       ['Leer en voz alta', () => (E.save.voice ? 'Sí' : 'No'), () => { E.save.voice = !E.save.voice; if (E.save.voice) E.say('Leeré en voz alta las explicaciones'); }],
       ['Ayudas a la', () => (E.save.hand === 'izq' ? 'izquierda' : 'derecha'), () => { E.save.hand = E.save.hand === 'izq' ? 'der' : 'izq'; }],
     ];
+    const GFX = { baja: 'Sencillos', nueva: 'Nuevos', original: 'Como el original', real: 'Original' };
+    if (E.gfxList().length > 1) opts.unshift(['Gráficos', () => GFX[E.gfx], () => { const L = E.gfxList(); E.save.gfx = L[(L.indexOf(E.gfx) + 1) % L.length]; E.setGfx(E.save.gfx); }]);
     if (GAME.usesDrag) opts.push(['Deslizar', () => ({ suave: 'Suave', normal: 'Normal', firme: 'Firme' })[E.save.drag || 'normal'], () => { E.save.drag = { suave: 'normal', normal: 'firme', firme: 'suave' }[E.save.drag || 'normal']; }]);
     if (GAME.usesAim) opts.push(['Disparar', () => (E.save.confirmShot ? 'Tocando a mamá' : 'Al soltar'), () => { E.save.confirmShot = !E.save.confirmShot; }]);
     E.openPopup({
@@ -1636,6 +1700,10 @@ const E = {};
     if (ac) { if (document.hidden) ac.suspend(); else ac.resume(); }
   });
   E.boot = function () {
+    loadSkinImages();
+    const qg = /[?&]gfx=(\w+)/.exec(location.search); // para probar: index.html?gfx=original
+    E.wantGfx = qg ? qg[1] : E.save.gfx || 'baja'; // si es un estilo con imágenes, se pone en cuanto carguen
+    E.setGfx(E.wantGfx);
     E.resize();
     E.setScreen(mapS);
     const J = E.save.resume;

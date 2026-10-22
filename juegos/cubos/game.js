@@ -243,8 +243,9 @@ const GAME = {
     });
   }
   function drawTile(g, t, x, y, ts) {
-    let spr;
-    switch (t.kind) {
+    const skt = E.skin('tile');
+    let spr = skt ? skt(t, ts, COLORS) : null;
+    if (!spr) switch (t.kind) {
       case 'cube': spr = cubeSprite(t.color, ts); break;
       case 'disco': spr = discoSprite(t.color, ts); break;
       case 'box': spr = boxSprite(t.hp, ts); break;
@@ -291,7 +292,7 @@ const GAME = {
       for (let i = 0; i < 4; i++) { const x = -s * 0.36 + i * s * 0.24; g.beginPath(); g.moveTo(x, -s * 0.44); g.lineTo(x, s * 0.44); g.stroke(); }
       g.lineWidth = s * 0.09; g.beginPath(); g.moveTo(-s * 0.46, -s * 0.42); g.lineTo(s * 0.46, -s * 0.42); g.moveTo(-s * 0.46, s * 0.42); g.lineTo(s * 0.46, s * 0.42); g.stroke();
     }
-    if (t.hintK && t.kind === 'cube') {
+    if (t.hintK && t.kind === 'cube' && !(skt && t.kind === 'cube' && spr)) {
       const hs = s * 0.38;
       const ch = t.hintK === 'rocket' ? '🚀' : t.hintK === 'bomb' ? '💣' : '✨';
       g.globalAlpha = 0.85;
@@ -301,7 +302,10 @@ const GAME = {
   }
   GAME.drawGoalIcon = function (g, gl, x, y, s) {
     let spr;
-    if (gl.type === 'color') spr = cubeSprite(gl.key, s);
+    // el estilo gráfico elegido dibuja el objetivo igual que la pieza del tablero
+    const skt = E.skin('tile'), as = { color: { kind: 'cube', color: gl.key }, box: { kind: 'box', hp: 1 }, balloon: { kind: 'balloon' }, egg: { kind: 'egg', hp: 2 }, ball: { kind: 'ball' }, pumpkin: { kind: 'pumpkin' }, gum: { kind: 'gum' }, ufo: { kind: 'ufo' }, soap: { kind: 'soap' }, piggy: { kind: 'piggy', hp: 1 }, cuckoo: { kind: 'cuckoo' }, crate: { kind: 'crate', hp: 5 } }[gl.type];
+    if (skt && as) spr = skt(as, s, COLORS);
+    if (spr) { /* ya está */ } else if (gl.type === 'color') spr = cubeSprite(gl.key, s);
     else if (gl.type === 'box') spr = boxSprite(1, s);
     else if (gl.type === 'balloon') spr = E.emojiSprite('🎈', s);
     else if (gl.type === 'egg') spr = eggSprite(2, s);
@@ -1515,6 +1519,8 @@ const GAME = {
         return;
       }
       d.age = 0.0001;
+      const skp = E.skin('pop');
+      if (skp && skp(t, t.x, t.y, ts, COLORS)) return;
       if (t.kind === 'cube') E.burst(t.x, t.y, [COLORS[t.color], E.shade(COLORS[t.color], 0.4)], 7, { size: 11 });
       else if (t.kind === 'box') { E.burst(t.x, t.y, ['#8a5a2b', '#c98b48', '#e0b07a'], 10, { size: 12 }); E.sfx('land', 1.2); }
       else if (t.kind === 'balloon') { E.burst(t.x, t.y, ['#ff4d4d', '#ffffff'], 10, { size: 9 }); E.sfx('pop', 1.6); }
@@ -1537,6 +1543,9 @@ const GAME = {
     P.draw = function (g) {
       // fondo del tablero
       g.save();
+      const skb = E.skin('board');
+      if (skb) skb(g, S, bx, by, ts);
+      else {
       g.fillStyle = 'rgba(255,255,255,0.85)';
       for (let c = 0; c < S.C; c++) {
         if (S.top[c] >= S.R) continue;
@@ -1551,6 +1560,7 @@ const GAME = {
       }
       g.fillStyle = 'rgba(255,255,255,0.05)';
       for (let r = 0; r < S.R; r++) for (let c = 0; c < S.C; c++) if (r >= S.top[c] && (r + c) % 2) g.fillRect(bx + c * ts, by + r * ts, ts, ts);
+      }
       // tierra (capa de la casilla)
       for (let r = 0; r < S.R; r++) for (let c = 0; c < S.C; c++) if (S.dirt[r][c] > 0) { g.fillStyle = S.dirt[r][c] > 1 ? 'rgba(90,55,25,0.95)' : 'rgba(140,95,50,0.9)'; g.fillRect(bx + c * ts + 2, by + r * ts + 2, ts - 4, ts - 4); }
       // recorte para que las piezas nuevas aparezcan desde el borde
@@ -1576,7 +1586,8 @@ const GAME = {
         let k = 1 + Math.sin(E.t * 2.5 + r + c) * 0.03;
         if (a != null) { if (a < 0) continue; k *= Math.min(1, a / 0.3); }
         const bs = ts * 1.04 * k;
-        g.drawImage(bubbleOverlay(ts), cx(c) - bs / 2, cy(r) - bs / 2, bs, bs);
+        const skbo = E.skin('bubble');
+        g.drawImage(skbo ? E.sprite('bubov', ts, ts, skbo) : bubbleOverlay(ts), cx(c) - bs / 2, cy(r) - bs / 2, bs, bs);
       }
       g.restore();
       // piezas que desaparecen
@@ -1591,10 +1602,12 @@ const GAME = {
         t.sc = o; t.alpha = 1;
       }
       // efectos
+      const skf = E.skin('fx');
       for (const f of fxs) {
         if (f.delay > 0) continue;
         const k = Math.min(1, f.age / 0.5);
         const x0 = cx(f.c), y0 = cy(f.r);
+        if (skf && skf(g, f, k, x0, y0, ts, S, cx, cy, COLORS)) continue;
         g.save();
         if (f.type === 'rocket') {
           const dist = k * Math.max(S.R, S.C) * ts * 1.2;

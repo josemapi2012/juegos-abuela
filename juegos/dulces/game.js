@@ -159,7 +159,8 @@ const GAME = {
     });
   }
   function jellySprite(level, ts) {
-    return E.sprite('jelly' + level, ts, ts, (g, w, h) => {
+    const skj = E.skin('jelly');
+    return E.sprite('jelly' + level, ts, ts, skj ? (g, w, h) => skj(g, w, h, level) : (g, w, h) => {
       E.rr(g, w * 0.03, h * 0.03, w * 0.94, h * 0.94, w * 0.12);
       g.fillStyle = level >= 2 ? 'rgba(200,60,200,0.75)' : 'rgba(255,130,230,0.55)';
       g.fill();
@@ -170,7 +171,9 @@ const GAME = {
   }
   function drawTile(g, t, x, y, ts) {
     let spr, k = 1;
-    if (t.kind === 'candy') spr = candySprite(t.color, t.sp, ts);
+    const skt = E.skin('tile');
+    if (skt) spr = skt(t, ts, COLORS);
+    if (spr) { /* dibujo del estilo elegido */ } else if (t.kind === 'candy') spr = candySprite(t.color, t.sp, ts);
     else if (t.kind === 'bomb') spr = bombSprite(ts);
     else if (t.kind === 'ice') spr = t.choc ? chocSprite(ts, t.vhp != null ? t.vhp : t.hp) : t.waffle ? waffleSprite(t.vhp != null ? t.vhp : t.hp, ts) : iceSprite(t.vhp != null ? t.vhp : t.hp, ts);
     else if (t.kind === 'lic') spr = licSprite(ts);
@@ -241,16 +244,20 @@ const GAME = {
   }
   // candado de regaliz (va encima de un caramelo; en su tramo sale en el 55% de los niveles)
   function lockSprite(ts) {
-    return E.sprite('lock', ts, ts, (g, w, h) => {
+    const skl = E.skin('lock');
+    return E.sprite('lock', ts, ts, skl || ((g, w, h) => {
       g.strokeStyle = '#26262e'; g.lineWidth = w * 0.11; g.lineCap = 'round';
       g.beginPath(); g.moveTo(w * 0.12, h * 0.12); g.lineTo(w * 0.88, h * 0.88); g.moveTo(w * 0.88, h * 0.12); g.lineTo(w * 0.12, h * 0.88); g.stroke();
       g.strokeStyle = 'rgba(255,255,255,0.3)'; g.lineWidth = w * 0.03; g.stroke();
       g.fillStyle = '#26262e'; g.beginPath(); g.arc(w / 2, h / 2, w * 0.13, 0, 7); g.fill();
-    });
+    }));
   }
   GAME.drawGoalIcon = function (g, gl, x, y, s) {
     let spr;
-    if (gl.type === 'color') spr = candySprite(gl.key, null, s);
+    const skt = E.skin('tile');
+    if (skt && gl.type === 'color') spr = skt({ kind: 'candy', color: gl.key }, s, COLORS);
+    if (!spr && skt && gl.type === 'ice') spr = skt({ kind: 'ice', hp: 1 }, s, COLORS);
+    if (spr) { /* estilo elegido */ } else if (gl.type === 'color') spr = candySprite(gl.key, null, s);
     else if (gl.type === 'jelly') spr = jellySprite(2, s);
     else if (gl.type === 'ice') spr = iceSprite(1, s);
     else if (gl.type === 'ing') spr = E.emojiSprite('🍒', s);
@@ -1550,12 +1557,16 @@ const GAME = {
 
     P.draw = function (g) {
       // tablero
+      const skb = E.skin('board');
+      if (skb) skb(g, S, bx, by, ts, (r, c) => inB(S, r, c));
+      else {
       g.fillStyle = 'rgba(255,255,255,0.8)';
       for (let r = 0; r < S.R; r++) for (let c = 0; c < S.C; c++) if (inB(S, r, c)) { E.rr(g, bx + c * ts - 6, by + r * ts - 6, ts + 12, ts + 12, 14); g.fill(); }
       g.fillStyle = 'rgba(40,30,90,0.72)';
       for (let r = 0; r < S.R; r++) for (let c = 0; c < S.C; c++) if (inB(S, r, c)) g.fillRect(bx + c * ts - 1, by + r * ts - 1, ts + 2, ts + 2);
       g.fillStyle = 'rgba(255,255,255,0.07)';
       for (let r = 0; r < S.R; r++) for (let c = 0; c < S.C; c++) if (inB(S, r, c) && (r + c) % 2) g.fillRect(bx + c * ts, by + r * ts, ts, ts);
+      }
       // generadores bajo los huecos
       if (S.portal) for (let r = 0; r < S.R; r++) for (let c = 0; c < S.C; c++) if (S.portal[r][c]) {
         // portal: anillo de entrada encima del hueco y de salida debajo
