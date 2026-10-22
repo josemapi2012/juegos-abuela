@@ -1,9 +1,17 @@
 {
- "actualizado": "2026-10-21T21:13:10.133087+00:00",
+ "actualizado": "2026-10-22T00:45:09.301314+00:00",
  "juegos": {
+  "cubos": {
+   "nivel": 2,
+   "estrellas": 3
+  },
   "dulces": {
-   "nivel": 1,
-   "estrellas": 0
+   "nivel": 2,
+   "estrellas": 3
+  },
+  "burbujas": {
+   "nivel": 5,
+   "estrellas": 11
   }
  }
 }
