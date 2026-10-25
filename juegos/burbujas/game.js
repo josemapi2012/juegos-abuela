@@ -5,7 +5,7 @@
 
 const GAME = {
   id: 'burbujas',
-  title: 'Burbujas HD',
+  title: 'Burbujas Panda',
   theme: {
     mascot: '🐼',
     accent: '#ff5c8a',

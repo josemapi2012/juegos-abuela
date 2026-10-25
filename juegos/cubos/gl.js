@@ -1000,7 +1000,7 @@
   function moved(p, x, y, rect, sprite) { const m = p.m.slice(); m[4] = x; m[5] = y; return Object.assign({}, p, { m, rect: rect || p.rect, sprite: sprite || p.sprite }); }
   function wrapLines(str, max) { const out = []; for (const par of String(str).split('\n')) { let line = ''; for (const w of par.split(' ')) { if ((line + ' ' + w).trim().length > max && line) { out.push(line); line = w; } else line = (line + ' ' + w).trim(); } out.push(line); } return out; }
   // rows: [{ text } | { label, red, fn, id } | { small }] de arriba abajo; devuelve true
-  function tbPanel(pop, title, rows, close) {
+  function tbPanel(pop, title, rows, close, onTitle) {
     if (!POPF || !POPF.PreLevelDialog || !pnode('BackgroundImage')) return false;
     if (!usedThisFrame) begin();
     usedThisFrame = true;
@@ -1035,6 +1035,7 @@
     root = prev;
     btns.forEach(([r, yb], i) => hs(0, yb, 3.4, 1.0, r.fn, r.id || 'gl_b' + i));
     if (close) hs(2.65, H / 2 - 0.11, 1.0, 1.0, close, 'gl_close');
+    if (onTitle) hs(0, H / 2, 3.6, 0.9, onTitle, 'gl_st_secret'); // Ajustes: 5 toques en el título abren "Ir al nivel" (para quien cuida la tablet)
     return true;
   }
   const NOEMO = (s) => String(s || '').replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2194}\u{FE0F}]/gu, '').replace(/\s{2,}/g, ' ').trim();
@@ -1126,7 +1127,7 @@
   const WINDOWS = {
     pause: (pop, d) => tbPanel(pop, 'Ajustes', [{ label: 'Seguir jugando', fn: d.resume, id: 'gl_resume' }, { label: 'Ajustes', fn: d.settings, id: 'gl_settings' }, { label: 'Salir al mapa', red: true, fn: d.leave, id: 'gl_leave' }, { small: 'Versión ' + (d.version || 'de la app') }], d.resume),
     exit: (pop, d) => tbPanel(pop, '¿Abandonar nivel?', [{ label: 'Abandonar', red: true, fn: d.leave, id: 'gl_leave' }], d.stay),
-    settings: (pop, d) => tbPanel(pop, 'Ajustes', d.opts.map((o, i) => ({ label: NOEMO(o.name) + ': ' + o.val(), fn: o.act, id: 'gl_opt' + i })), d.close),
+    settings: (pop, d) => tbPanel(pop, 'Ajustes', d.opts.map((o, i) => ({ label: NOEMO(o.name) + ': ' + o.val(), fn: o.act, id: 'gl_opt' + i })), d.close, d.secret),
     info: (pop, d) => tbPanel(pop, NOEMO(d.title), [{ text: NOEMO(d.text) }, { label: 'Vale', fn: d.ok, id: 'gl_ok' }], d.ok),
     daily: (pop, d) => dailyWheel(pop, d),
     ...MORE,

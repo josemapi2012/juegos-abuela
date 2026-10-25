@@ -669,7 +669,7 @@
     if (t && t.width > w * 0.86) t.scale.set((t.scale.x * w * 0.86) / t.width);
   }
   // panel: rows = [{ text } | { label, color, fn, id } | { small } | { h, draw(o) }], de arriba abajo (px del prefab)
-  function ppPanel(pop, title, rows, close, hard, extra) {
+  function ppPanel(pop, title, rows, close, hard, extra, onTitle) {
     if (!usedThisFrame) begin();
     usedThisFrame = true;
     const k = (E.W * 0.9) / 980, cx = E.W / 2, cy = E.H * 0.5, v = PPV[hard || 0];
@@ -696,6 +696,7 @@
       y -= h;
     });
     if (close) { const t = tex('Button_Close' + v); if (t) { const [x, yy] = at(457, top - 52); img(t, x, yy, { w: 115 * k, h: 115 * k, ax: 0.5, ay: 0.5 }); } hs(457, top - 52, 130, 130, close, 'gl_close'); }
+    if (onTitle) hs(0, top + 22, 600, 110, onTitle, 'gl_st_secret'); // Ajustes: 5 toques en el título abren "Ir al nivel" (para quien cuida la tablet)
     if (extra && extra.over) extra.over({ at, k, top, hs });
     root = prev;
     return true;
@@ -785,7 +786,7 @@
   const WINDOWS = {
     pause: (pop, d) => ppPanel(pop, 'Ajustes', [{ label: 'Continuar', fn: d.resume, id: 'gl_resume' }, { label: 'Ajustes', color: 'yellow', fn: d.settings, id: 'gl_settings' }, { label: 'Salir', color: 'red', fn: d.leave, id: 'gl_leave' }, { small: 'Versión ' + (d.version || 'de la app') }], d.resume),
     exit: (pop, d) => ppPanel(pop, '¿Salir del nivel?', [{ text: '¿Seguro que deseas salir?' }, { label: 'Seguir jugando', fn: d.stay, id: 'gl_stay' }, { label: 'Salir', color: 'red', fn: d.leave, id: 'gl_leave' }], d.stay),
-    settings: (pop, d) => ppPanel(pop, 'Ajustes', d.opts.map((o2, i) => ({ label: NOEMO(o2.name) + ': ' + o2.val(), color: 'yellow', fn: o2.act, id: 'gl_opt' + i, w: 760 })), d.close),
+    settings: (pop, d) => ppPanel(pop, 'Ajustes', d.opts.map((o2, i) => ({ label: NOEMO(o2.name) + ': ' + o2.val(), color: 'yellow', fn: o2.act, id: 'gl_opt' + i, w: 760 })), d.close, 0, null, d.secret),
     info: (pop, d) => ppPanel(pop, NOEMO(d.title), [{ text: NOEMO(d.text) }, { label: 'Continuar', fn: d.ok, id: 'gl_ok' }], d.ok),
     reward: (pop, R) => { const n = R.icons.length; return ppPanel(pop, NOEMO(R.title), [{ text: NOEMO(R.sub) }, ...(n ? [{ h: 220, draw: (o) => R.icons.forEach((ic, i) => { const [x, y] = o.at((i - (n - 1) / 2) * 210, o.top - 105), d = 170 * o.k; nine('Panel_Background', x - d / 2, y - d / 2, d, d, o.k * 1.6); img(emojiTex(ic), x, y, { w: d * 0.7, h: d * 0.7, ax: 0.5, ay: 0.5 }); }) }] : []), { label: 'Continuar', fn: R.ok, id: 'gl_rw_ok' }], R.ok); },
     missions: (pop, M) => ppPanel(pop, 'Misiones', M.items().map((q) => ({ h: 170, draw: (o) => {

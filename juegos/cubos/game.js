@@ -3,7 +3,7 @@
 
 const GAME = {
   id: 'cubos',
-  title: 'Cubos HD',
+  title: 'Cubos Locos',
   theme: {
     mascot: '👧',
     accent: '#ff6a2b',

@@ -2206,8 +2206,8 @@ const E = {};
   function drawCarga(g) {
     const C = window.GL && GL.carga;
     if (!C || E.wantGfx !== 'real' || (E.gfx === 'real' && (!GL.listo || GL.listo()))) return false;
-    if (!carga.pedido) { carga.pedido = true; carga.t0 = E.t; for (const p of [C.fondo].concat(C.piezas || [])) if (p && p.f) { const im = new Image(); im.onload = () => { carga.img[p.f] = im; }; im.src = E.privBase() + 'carga/' + p.f; } }
-    if (E.t - carga.t0 > 20) return false; // si no cargan (sin imágenes), el dibujo de siempre
+    if (!carga.pedido) { carga.pedido = true; carga.t0 = E.t; for (const p of [C.fondo].concat(C.piezas || [])) if (p && p.f) { const im = new Image(); im.onload = () => { carga.img[p.f] = im; }; im.onerror = () => { carga.falta = true; }; im.src = E.privBase() + 'carga/' + p.f; } }
+    if (carga.falta || E.t - carga.t0 > 20) return false; // sin sus imágenes (la página pública no las lleva) o si tardan: el dibujo de siempre
     g.fillStyle = C.color || '#000'; g.fillRect(0, 0, E.W, E.H);
     const F = C.fondo && carga.img[C.fondo.f];
     if (F) {
