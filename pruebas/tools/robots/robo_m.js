@@ -14,8 +14,10 @@ window.robo = function (n) {
     if (S.charge >= 200) {
       const [rx, ry] = P.rocketXY(); P.down(rx, ry); P.up && P.up();
       const c = GAME.bestColumn(S, spec.V);
-      const B = E.play.layout.board; // una fila que se vea dentro del tablero
-      for (let r = 0; r < S.R; r++) { const [x, y] = P.cellXY(r, c); if (y > B.y + 30 && y < B.y + B.h - 140) { P.down(x, y); break; } }
+      const B = E.play.layout.board; // una fila que se vea dentro del tablero (en el dibujo WebGL el tablero va centrado: sus límites)
+      const G = P.glState && P.glState(), top = G ? G.by + 4 : B.y + 30, bot = G ? G.by + G.V * G.tsy - 4 : B.y + B.h - 140;
+      for (let r = 0; r < S.R; r++) { const [x, y] = P.cellXY(r, c); if (y > top && y < bot) { P.down(x, y); break; } }
+      if (G && P.fireRocket && P.glState().rocketAim) P.fireRocket(); // en el dibujo WebGL se confirma con ✓
       E.step(1 / 30); continue;
     }
     const m = GAME.botPick(S, need, spec.V);

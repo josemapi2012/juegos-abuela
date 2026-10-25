@@ -10,7 +10,8 @@ window.robo = function (n) {
     if (E.popup) return { n, win: false, moves: spec.moves, goals: P.goals.filter((g) => g.left > 0).map((g) => g.type + (g.key != null ? g.key : '') + ':' + g.left).join(' ') };
     if (P.dead || P.moves <= 0 || !P.goals.some((g) => g.left > 0)) { for (let i = 0; i < 300 && !E.popup; i++) E.step(1 / 30); continue; }
     const S0 = P.S, lay = E.play.layout.board;
-    const ts = Math.min(lay.w / S0.C, lay.h / S0.R, 78), bx = lay.x + (lay.w - ts * S0.C) / 2, by = lay.y + (lay.h - ts * S0.R) / 2;
+    const gs = P.glState && P.glState(); // Cubos HD: el tablero lo coloca WebGL
+    const ts = gs ? gs.ts : Math.min(lay.w / S0.C, lay.h / S0.R, 78), bx = gs ? gs.bx : lay.x + (lay.w - ts * S0.C) / 2, by = gs ? gs.by : lay.y + (lay.h - ts * S0.R) / 2;
     const need = { color: {} };
     P.goals.forEach((g) => { if (g.type === 'color') need.color[g.key] = g.left; else need[g.type] = g.left; });
     const b = GAME.botPick(P.S, need);

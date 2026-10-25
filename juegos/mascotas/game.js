@@ -216,27 +216,32 @@ const GAME = {
     g.translate(x, y);
     if (t.rot) g.rotate(t.rot);
     if (t.kind === 'pet' || t.kind === 'cage') {
-      g.rotate(Math.sin(E.t * 3 + t.id) * 0.06);
       const ps = s * (t.kind === 'cage' ? 0.86 : 1.08);
-      g.drawImage(E.emojiSprite(t.pet, ps), -ps / 2, -ps / 2, ps, ps);
-      if (t.kind === 'cage' && t.carrier) { const cs = s * 0.5; g.drawImage(E.emojiSprite('🧳', cs), s * 0.5 - cs, s * 0.5 - cs, cs, cs); }
+      const skA = E.skin('petAnim'); // el estilo puede animar la mascota (reposo o cayendo)
+      if (!(skA && skA(g, t, ps))) { g.rotate(Math.sin(E.t * 3 + t.id) * 0.06); g.drawImage(E.emojiSprite(t.pet, ps), -ps / 2, -ps / 2, ps, ps); }
+      const skCar = E.skin('carrierBox'); // el estilo puede dibujar el transportín entero
+      if (t.kind === 'cage' && t.carrier && skCar && skCar(g, s)) { /* dibujado */ }
+      else if (t.kind === 'cage' && t.carrier) { const cs = s * 0.5; g.drawImage(E.emojiSprite('🧳', cs), s * 0.5 - cs, s * 0.5 - cs, cs, cs); }
       else if (t.kind === 'cage') g.drawImage(cageSprite(t.vhp != null ? t.vhp : t.hp, ts), -s / 2, -s / 2, s, s);
     } else {
       const skt = E.skin('tile');
       const spr = (skt && skt(t, ts, COLORS)) || (t.kind === 'block' ? blockSprite(t.color, ts) : t.kind === 'black' ? blackSprite(ts) : t.kind === 'cbomb' ? colorBombSprite(t.color, ts)
         : t.kind === 'lblast' ? lineBlastSprite(t.color, ts) : t.kind === 'roto' || t.kind === 'dblast' ? rotoSprite(t.color, t.dir, ts) : t.kind === 'gdiam' ? glassDiamSprite(ts) : t.kind === 'paint' ? paintSprite(t.color, ts) : t.kind === 'freezer' ? freezerSprite(ts) : t.kind === 'lock' ? lockSprite(ts) : t.kind === 'gkey' ? glassKeySprite(ts) : t.kind === 'fbox' || t.kind === 'ibox' ? boxSprite(t.kind, ts) : t.kind === 'vflower' ? flowerSprite(t.dir, ts) : t.kind === 'wall' ? wallSprite(ts) : glassBombSprite(ts));
       g.drawImage(spr, -s / 2, -s / 2, s, s);
-      if (t.rainbow) { const rs = s * 0.9; g.drawImage(E.emojiSprite('🌈', rs * 0.55), -rs * 0.28, -rs * 0.28, rs * 0.55, rs * 0.55); }
-      if (t.mult) { g.fillStyle = '#ffd23f'; g.beginPath(); g.arc(s * 0.3, -s * 0.3, s * 0.18, 0, 7); g.fill(); E.text(g, 'x' + t.mult, s * 0.3, -s * 0.29, s * 0.2, '#7a3b00', { stroke: false }); }
-      if (t.wire && t.vine) { const vs = s * 0.8; g.globalAlpha *= 0.9; g.drawImage(E.emojiSprite('🌿', vs), -vs / 2, -vs / 2, vs, vs); g.globalAlpha = t.alpha != null && t.alpha < 1 ? Math.max(0, t.alpha) : 1; }
+      const skm = E.skin('blockMarks'); // el estilo puede dibujar arcoíris, multiplicador y virus a su manera
+      const marks = skm && skm(g, t, s);
+      if (t.rainbow && !marks) { const rs = s * 0.9; g.drawImage(E.emojiSprite('🌈', rs * 0.55), -rs * 0.28, -rs * 0.28, rs * 0.55, rs * 0.55); }
+      if (t.mult && !marks) { g.fillStyle = '#ffd23f'; g.beginPath(); g.arc(s * 0.3, -s * 0.3, s * 0.18, 0, 7); g.fill(); E.text(g, 'x' + t.mult, s * 0.3, -s * 0.29, s * 0.2, '#7a3b00', { stroke: false }); }
+      if (t.wire && t.vine && marks && skm(g, Object.assign({}, t, { kind: 'vineCover' }), s)) { /* enredadera del estilo */ }
+      else if (t.wire && t.vine) { const vs = s * 0.8; g.globalAlpha *= 0.9; g.drawImage(E.emojiSprite('🌿', vs), -vs / 2, -vs / 2, vs, vs); g.globalAlpha = t.alpha != null && t.alpha < 1 ? Math.max(0, t.alpha) : 1; }
       else if (t.wire) { const ws = s; g.drawImage(wireSprite(t.wire, ts), -ws / 2, -ws / 2, ws, ws); }
-      if (t.bfly) { const bs = s * 0.5; g.save(); g.rotate(Math.sin(E.t * 5 + t.id) * 0.25); g.drawImage(E.emojiSprite('🦋', bs), -bs / 2, -bs / 2, bs, bs); g.restore(); }
-      if (t.det != null) { // detonador: cuenta atrás; a 0 explota
+      if (t.bfly && !marks) { const bs = s * 0.5; g.save(); g.rotate(Math.sin(E.t * 5 + t.id) * 0.25); g.drawImage(E.emojiSprite('🦋', bs), -bs / 2, -bs / 2, bs, bs); g.restore(); }
+      if (t.det != null && !marks) { // detonador: cuenta atrás; a 0 explota
         g.beginPath(); g.arc(-s * 0.26, -s * 0.26, s * 0.2, 0, 7); g.fillStyle = t.det <= 1 ? '#d62828' : '#2b2b33'; g.fill();
         g.lineWidth = s * 0.04; g.strokeStyle = '#fff'; g.stroke();
         E.text(g, String(t.det), -s * 0.26, -s * 0.25, s * 0.24, '#fff', { stroke: false });
       }
-      if (t.virus) { const vs = s * 0.42; g.drawImage(E.emojiSprite('🦠', vs), s * 0.5 - vs, -s * 0.5, vs, vs); }
+      if (t.virus && !marks) { const vs = s * 0.42; g.drawImage(E.emojiSprite('🦠', vs), s * 0.5 - vs, -s * 0.5, vs, vs); }
     }
     g.restore();
   }
@@ -310,7 +315,7 @@ const GAME = {
       for (let r = 0; r < S.R && !pet; r++) for (let c = 0; c < S.C; c++) { const o = S.grid[r][c]; if (o && o.kind === 'pet') { pet = [r, c, o]; break; } }
       if (pet) {
         const [r, c, o] = pet;
-        S.grid[r][c] = null; rem(S, K, o, 0.2, { mode: 'pet', r: S.R - 1, c }); K.collect('pet', undefined, o, 0.2); S.score = (S.score || 0) + 2000;
+        S.grid[r][c] = null; rem(S, K, o, 0.2, { mode: 'pet', r: S.R - 1, c }); K.collect('pet', undefined, o, 0.2); S.score = (S.score || 0) + 1000;
         K.bfly(r, c);
       } else {
         const bl = [];
@@ -334,19 +339,19 @@ const GAME = {
   }
   function explode(S, r, c, delay, K, t) {
     rem(S, K, t, delay);
-    K.fx({ type: 'bomb', r, c, rad: 1.5, delay });
+    K.fx({ type: 'bomb', r, c, rad: 1.5, delay, ev: ['BombBlast', 'BombShockwave'] });
     for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) if (dr || dc) damage(S, r + dr, c + dc, delay + 0.05, K);
   }
   // bomba de color: todos los bloques de su color; rompelíneas: su fila entera
   function fireSpecial(S, r, c, o, delay, K) {
     rem(S, K, o, delay);
     if (o.kind === 'cbomb') {
-      K.fx({ type: 'bomb', r, c, rad: 1, delay });
+      K.fx({ type: 'bomb', r, c, rad: 1, delay, ev: ['ColorpopRed', 'ColorpopGreen', 'ColorpopBlue', 'ColorpopYellow', 'ColorpopPurple'][o.color || 0] });
       for (let rr = 0; rr < S.R; rr++) for (let cc = 0; cc < S.C; cc++) { const q = S.grid[rr][cc]; if (q && q.kind === 'block' && q.color === o.color) damage(S, rr, cc, delay + 0.2 + 0.02 * (Math.abs(rr - r) + Math.abs(cc - c)), K); }
     } else if (o.kind === 'roto' || o.kind === 'dblast') {
       // rotobomba: dispara en la dirección a la que apunta
       const [dr, dc] = DIRS[o.dir];
-      K.fx({ type: 'rocket', dir: dr ? 'v' : 'h', r, c, delay });
+      K.fx({ type: 'rocket', dir: dr ? 'v' : 'h', r, c, delay, ev: ['RotoblasterUp', 'RotoblasterRight', 'RotoblasterDown', 'RotoblasterLeft'][o.dir] });
       for (let k = 1; k < Math.max(S.R, S.C); k++) damage(S, r + dr * k, c + dc * k, delay + k * 0.03, K);
     } else if (o.kind === 'paint') {
       // cubo de pintura: pinta de su color hasta 4 bloques contiguos y él vuelve a ser un bloque
@@ -363,7 +368,7 @@ const GAME = {
         }
       }
     } else {
-      K.fx({ type: 'rocket', dir: 'h', r, c, delay });
+      K.fx({ type: 'rocket', dir: 'h', r, c, delay, ev: 'block_lineblast_force' });
       for (let cc = 0; cc < S.C; cc++) damage(S, r, cc, delay + Math.abs(cc - c) * 0.03, K);
     }
   }
@@ -412,7 +417,7 @@ const GAME = {
     q.virus = true; K.recolor(q);
   }
   function blastColumn(S, c, r, K) {
-    K.fx({ type: 'rocket', dir: 'v', r, c, delay: 0 });
+    K.fx({ type: 'rocket', dir: 'v', r, c, delay: 0, ev: ['ColumnBlast', 'epicColumnLaunch'] });
     for (let rr = 0; rr < S.R; rr++) damage(S, rr, c, Math.abs(rr - r) * 0.03, K);
   }
   function act(S, r, c, K) {
@@ -427,7 +432,8 @@ const GAME = {
     if (t.kind !== 'block') return false;
     const grp = group(S, r, c);
     if (grp.length < 2) return false;
-    const mult = grp.reduce((m, [rr, cc]) => m * (S.grid[rr][cc].mult || 1), 1); // bloques multiplicadores
+    // Pet Rescue (CPRRuleMatch, FUN_0151c0dc): 10 × n² × la suma de los multiplicadores del grupo (al menos 1)
+    const mult = Math.max(1, grp.reduce((m, [rr, cc]) => m + (S.grid[rr][cc].mult || 0), 0));
     const hitSet = new Set();
     for (const [rr, cc] of grp) {
       const tt = S.grid[rr][cc]; S.grid[rr][cc] = null;
@@ -443,7 +449,7 @@ const GAME = {
       if (o && o.kind === 'cage' && !hitSet.has(o)) { hitSet.add(o); hitCage(S, rr + dr, cc + dc, o, 0.05, K); }
       if (o && o.kind === 'vflower' && !hitSet.has(o)) { hitSet.add(o); S.grid[rr + dr][cc + dc] = null; rem(S, K, o, 0.05); }
     }
-    S.score = (S.score || 0) + 20 * grp.length * grp.length * mult; // grupos grandes dan muchos más puntos; los multiplicadores los doblan
+    S.score = (S.score || 0) + 10 * grp.length * grp.length * mult;
     S.charge = Math.min(CHARGE_FULL, (S.charge || 0) + chargeFor(grp.length));
     K.sound(grp.length);
     settle(S, K);
@@ -501,7 +507,7 @@ const GAME = {
       let any = false;
       for (let c = 0; c < S.C; c++) {
         const o = S.grid[S.R - 1][c];
-        if (o && o.kind === 'pet') { S.grid[S.R - 1][c] = null; rem(S, K, o, 0, { mode: 'pet', r: S.R - 1, c }); K.collect('pet', undefined, o, 0); S.score = (S.score || 0) + 2000; any = true; }
+        if (o && o.kind === 'pet') { S.grid[S.R - 1][c] = null; rem(S, K, o, 0, { mode: 'pet', r: S.R - 1, c }); K.collect('pet', undefined, o, 0); S.score = (S.score || 0) + 1000; any = true; }
         // la bomba en cristal estalla al llegar al suelo
         if (o && o.kind === 'gbomb') { S.grid[S.R - 1][c] = null; explode(S, S.R - 1, c, 0.15, K, o); any = true; }
         if (o && o.kind === 'gdiam') { S.grid[S.R - 1][c] = null; rem(S, K, o, 0.1); S.score = (S.score || 0) + 1000; K.bonus(o, 1000); any = true; }
@@ -644,6 +650,8 @@ const GAME = {
     return best;
   }
 
+  // tiempos de la partida; el estilo puede cambiarlos (E.skin('timing'))
+  const TM = () => Object.assign({ gravity: 50, bounce: 0, brighten: 0 }, E.skin('timing') || {});
   const cache = new Map();
   // generador por pasos: el motor lo avanza poco a poco en segundo plano (ver E.prefetch)
   function* levelG(n) {
@@ -656,19 +664,21 @@ const GAME = {
       if (!spec || cost(sp) < cost(spec)) spec = sp;
       if (spec.botMoves <= 36 && spec.botHelps === 0) break;
     }
-    // como en Pet Rescue: solo los niveles de puntos tienen movimientos (de 40 a 80 en su tramo);
+    // como en Pet Rescue: solo los niveles de puntos tienen movimientos (los de su tramo, TRAMOS.mov);
     // rescate y clásico no tienen límite. En todos hace falta la 1ª estrella de puntos para ganar.
     if (spec.mode === 'score') {
       const r2 = E.rng(n * 7741 + 3);
-      const target = Math.round(30 + spec.d * 20 + r2() * 14);
+      const target = Math.round(quant(tramo(n).mov, r2()));
       // las mascotas caen al azar: medimos con más partidas y nos quedamos con la peor
       const extra = [yield* botRunG(spec, n * 31 + 7), yield* botRunG(spec, n * 31 + 8)].map((x) => x.moves);
       const worst = Math.max(spec.botMoves, ...extra.filter((m) => m < 999));
       // si el bot va muy sobrado se recortan movimientos para que siga siendo un reto
-      spec.moves = E.clamp(Math.max(Math.min(target, Math.ceil(worst * 1.4) + 3), Math.ceil(worst * 1.2) + 2), 15, 80);
+      // (calibrado 23-10-2026: con 1.4/1.2 el robot ganaba el 96% de los de puntos; con 1.15/1.02 se busca el 75-80%)
+      spec.moves = E.clamp(Math.max(Math.min(target, Math.ceil(worst * 1.15) + 2), Math.ceil(worst * 1.02) + 1), 15, 80);
     } else spec.moves = Infinity;
     const r500 = (v) => Math.max(500, Math.round(v / 500) * 500);
-    spec.starScores = [r500(spec.botScore * 0.5), r500(spec.botScore * 0.75), r500(spec.botScore * 0.95)];
+    // (calibrado 23-10-2026: con la 1ª estrella al 50% de lo que saca el bot se ganaba el 94% de los de puntos)
+    spec.starScores = [r500(spec.botScore * 0.8), r500(spec.botScore * 0.92), r500(spec.botScore * 1.05)];
     if (spec.starScores[1] <= spec.starScores[0]) spec.starScores[1] = spec.starScores[0] + 500;
     if (spec.starScores[2] <= spec.starScores[1]) spec.starScores[2] = spec.starScores[1] + 500;
     cache.set(n, spec);
@@ -679,19 +689,46 @@ const GAME = {
   GAME.genLevel = (n, a) => E.runGen(genLevelG(n, a));
   GAME.botPick = (S, need, V) => botPick(S, need, V);
   GAME.bestColumn = (S, V) => bestColumn(S, V);
+  // Tramos medidos en los 10 437 niveles reales de Pet Rescue Saga (tools/pr_niveles.py; ver analisis/petrescue_niveles.md):
+  // modos, niveles que reponen bloques, movimientos (p10 p25 p50 p75 p90), colores (3/4/5), columnas (7/8/9),
+  // filas del tablero (p25 p50 p75), mascotas a salvar (p25 p50 p75) y probabilidad de cada pieza
+  const TRAMOS = [
+    {to:20,mode:{rescue:0.65,score:0.35},refill:0.35,mov:[25,30,50,70,75],col:[0.35,0.25,0.15],cols:[0.1,0.2,0.6],rows:[9,9,20],pets:[4,5,6],el:{cbomb:0.4,gbomb:0.25}},
+    {to:50,mode:{score:0.47,rescue:0.37,classic:0.17},refill:0.47,mov:[28,35,45,55,70],col:[0.17,0.23,0.2],cols:[0.13,0.07,0.73],rows:[9,9,18],pets:[5,7,9],el:{cbomb:0.6,gbomb:0.6,lock:0.47,gdiam:0.33,black:0.33,lblast:0.13}},
+    {to:100,mode:{rescue:0.5,score:0.32,classic:0.14,hybrid:0.04},refill:0.36,mov:[25,32,40,55,66],col:[0.14,0.24,0.04],cols:[0.02,0.12,0.82],rows:[9,9,28],pets:[4,5,6],el:{gdiam:0.54,black:0.5,cbomb:0.44,lock:0.38,lblast:0.36,gbomb:0.24,cage:0.24,wire:0.02}},
+    {to:200,mode:{rescue:0.32,classic:0.26,score:0.26,hybrid:0.16},refill:0.42,mov:[20,35,40,50,50],col:[0.17,0.17,0.12],cols:[0.06,0.14,0.77],rows:[9,16,24],pets:[3,4,6],el:{cbomb:0.61,gdiam:0.55,black:0.49,lblast:0.48,lock:0.4,gbomb:0.3,virus:0.19,cage:0.14,paint:0.07}},
+    {to:500,mode:{score:0.39,rescue:0.25,hybrid:0.2,classic:0.17},refill:0.59,mov:[27,30,40,50,50],col:[0.15,0.28,0.15],cols:[0.04,0.06,0.88],rows:[9,9,20],pets:[4,5,8],el:{black:0.42,gdiam:0.38,gbomb:0.33,cbomb:0.32,lock:0.29,wire:0.27,lblast:0.23,paint:0.21,roto:0.19,det:0.17,cage:0.16,rainbow:0.07,freezer:0.06,ibox:0.04,virus:0.04}},
+    {to:1000,mode:{score:0.45,rescue:0.24,classic:0.18,hybrid:0.13},refill:0.59,mov:[30,40,45,50,50],col:[0.09,0.42,0.13],cols:[0.03,0.11,0.84],rows:[9,9,16],pets:[4,6,10],el:{gdiam:0.45,black:0.35,wire:0.34,lock:0.27,gbomb:0.27,cbomb:0.24,roto:0.21,lblast:0.16,paint:0.12,cage:0.12,det:0.08,virus:0.07,ibox:0.07,rainbow:0.07,freezer:0.06,bfly:0.06}},
+    {to:2000,mode:{score:0.47,classic:0.27,rescue:0.18,hybrid:0.09},refill:0.56,mov:[30,35,45,50,50],col:[0.09,0.5,0.15],cols:[0.05,0.24,0.7],rows:[9,9,16],pets:[4,5,8],el:{gdiam:0.32,black:0.28,roto:0.28,vflower:0.27,gbomb:0.24,wire:0.24,lock:0.17,det:0.13,cbomb:0.12,virus:0.11,bfly:0.1,freezer:0.1,paint:0.1,cage:0.09,lblast:0.06,ibox:0.05,rainbow:0.05}},
+    {to:5000,mode:{score:0.42,classic:0.25,rescue:0.19,hybrid:0.14},refill:0.56,mov:[24,28,32,39,40],col:[0.17,0.21,0.12],cols:[0.04,0.05,0.89],rows:[9,9,18],pets:[3,5,8],el:{wire:0.47,gdiam:0.46,black:0.3,det:0.23,vflower:0.19,roto:0.18,lock:0.16,gbomb:0.15,ibox:0.14,freezer:0.13,bfly:0.13,virus:0.12,cage:0.1,paint:0.09,rainbow:0.06,cbomb:0.04,lblast:0.02}},
+    {to:1e9,mode:{score:0.55,rescue:0.23,classic:0.18,hybrid:0.04},refill:0.59,mov:[21,24,28,30,35],col:[0.24,0.13,0.08],cols:[0.07,0.04,0.87],rows:[9,9,14],pets:[4,6,10],el:{gdiam:0.55,det:0.42,black:0.35,wire:0.31,roto:0.19,lock:0.18,bfly:0.14,virus:0.14,ibox:0.14,vflower:0.12,cage:0.11,freezer:0.07,paint:0.07,gbomb:0.06,rainbow:0.06,cbomb:0.04,lblast:0.02}},
+  ];
+  const tramo = (n) => TRAMOS.find((t) => n <= t.to);
+  // nivel en que Pet Rescue estrena cada cosa (primera aparición en sus niveles). Las que no salen en sus niveles
+  // (empujabloques, multiplicadores, transportines y suelo de piedra con agujeros) se dejan para más adelante
+  const INTRO = { refill: 6, score: 6, cbomb: 13, gbomb: 14, gdiam: 28, lock: 28, classic: 30, black: 33, lblast: 46, wire: 51, hybrid: 69, cage: 74,
+    virus: 103, paint: 193, det: 238, roto: 283, freezer: 313, rainbow: 358, ibox: 448, dblast: 500, mult: 600, carrier: 700, wall: 800, bfly: 883, vflower: 1093 };
+  const pickW = (rng, ws) => { const s = ws.reduce((a, b) => a + b, 0); let x = rng() * s; for (let i = 0; i < ws.length; i++) { x -= ws[i]; if (x < 0) return i; } return ws.length - 1; };
+  const quant = (q, u) => { const x = u * (q.length - 1), i = Math.min(q.length - 2, Math.floor(x)); return q[i] + (q[i + 1] - q[i]) * (x - i); };
   function* genLevelG(n, attempt) {
     const rng = E.rng(n * 3266489917 + 101 + attempt * 4243);
     const d = E.difficulty(n) * Math.pow(0.8, attempt);
-    const C = n < 5 ? 7 : rng.pick([8, 9, 9]);
+    const T = tramo(n);
+    // cada pieza sale a partir del nivel en que la estrena Pet Rescue (ese nivel seguro) y luego con su frecuencia en el tramo
+    const on = (k) => n === INTRO[k] || (n > INTRO[k] && rng() < (T.el[k] != null ? T.el[k] : 0.05));
+    const C = n < 5 ? 7 : 7 + pickW(rng, T.cols);
     const V = Math.floor(530 / Math.min(580 / C, 76)); // filas que caben (dejando sitio al cohete)
-    // como en Pet Rescue: algo más de la mitad de los niveles reponen bloques desde arriba
-    const refill = n === 6 || (n > 6 && n !== 8 && n !== 12 && n !== 18 && rng() < 0.6);
-    // modos de Pet Rescue en su tramo: puntos (se rellena, movimientos limitados) 45%,
-    // rescate (tablero alto, sin límite) 41% y clásico (despeja todos los bloques, sin límite) 14%
-    const classic = !refill && n >= 30 && rng() < 0.4;
-    const extra = refill || n < 6 ? 0 : Math.round(3 + d * 8 + rng() * 4);
+    // modo con la frecuencia de su tramo: rescate (sin límite), puntos (reponen bloques y hay movimientos),
+    // clásico (despeja todos los bloques) e híbrido (salva las mascotas y despeja los bloques)
+    const modes = Object.keys(T.mode).filter((m) => n >= (INTRO[m] || 1));
+    let mode = n === INTRO.score ? 'score' : n === INTRO.classic ? 'classic' : n === INTRO.hybrid ? 'hybrid' : modes[pickW(rng, modes.map((m) => T.mode[m]))];
+    if (n < INTRO.score) mode = 'rescue';
+    const refill = mode === 'score';
+    const classic = mode === 'classic';
+    // la mayoría de los tableros caben en una pantalla; algunos son altos (filas p25 p50 p75 de su tramo)
+    const extra = refill || n < 6 ? 0 : Math.max(0, Math.round(quant(T.rows, rng())) - V);
     const R = V + extra;
-    const colors = n < 4 ? 3 : n < 25 ? 4 : d > 0.55 && rng() < 0.5 ? 5 : 4;
+    const colors = n < 4 ? 3 : 3 + pickW(rng, T.col);
     const heights = [];
     const prof = refill ? 0 : rng.int(4);
     for (let c = 0; c < C; c++) {
@@ -707,7 +744,8 @@ const GAME = {
     for (let c = 0; c < C; c++) for (let k = 0; k < heights[c]; k++) cells[R - 1 - k][c] = { kind: 'block', color: rng.int(colors) };
     const petType = PETS[n % PETS.length];
     const petTypes = [petType, PETS[(n + 3) % PETS.length], PETS[(n + 6) % PETS.length]];
-    const npets = classic ? 0 : n < 3 ? 2 : Math.min(C - 1, 2 + Math.round(d * 3 + rng()));
+    const petsWant = Math.round(quant(T.pets, rng()));
+    const npets = classic ? 0 : n < 3 ? 2 : Math.min(C - 1, refill ? 2 + rng.int(2) : petsWant);
     const step = C / Math.max(1, npets);
     let placedPets = 0;
     for (let i = 0; i < npets; i++) {
@@ -717,7 +755,7 @@ const GAME = {
     }
     // jaulas con animalito dentro (desde el nivel 12)
     let cages = 0;
-    if (!classic && (n === 12 || (n > 12 && rng() < 0.45))) {
+    if (!classic && on('cage')) {
       const want = 1 + Math.round(d * 2);
       for (let i = 0; i < 40 && cages < want; i++) {
         const r = rng.range(Math.floor(R * 0.35), R - 3), c = rng.int(C);
@@ -725,7 +763,7 @@ const GAME = {
       }
     }
     // bloques negros (solo se rompen con bombas, cohete o ayudas) desde el nivel 18
-    if (n === 18 || (n > 18 && rng() < 0.35)) {
+    if (on('black')) {
       const nb = attempt > 4 ? 1 : 2 + Math.round(d * 4);
       for (let i = 0, k = 0; i < 60 && k < nb; i++) {
         const r = rng.range(Math.floor(R * 0.5), R - 2), c = rng.int(C);
@@ -734,7 +772,7 @@ const GAME = {
     }
     // bombas en cristal desde el nivel 8
     let bombRate = 0;
-    if (n === 8 || (n > 8 && rng() < 0.5)) {
+    if (on('gbomb')) {
       const nb = 1 + Math.round(d * 2 + rng());
       for (let i = 0; i < nb; i++) {
         const r = rng.range(Math.floor(R * 0.2), Math.floor(R * 0.6)), c = rng.int(C);
@@ -743,15 +781,16 @@ const GAME = {
       if (refill) bombRate = 0.02;
     }
     // bloques especiales sueltos (bomba de color 88% y rompelíneas 69% en su tramo) desde el 14
-    if (n === 14 || (n > 14 && rng() < 0.75)) {
-      const ns = 1 + (rng() < 0.5 ? 1 : 0);
+    for (const kind of ['cbomb', 'lblast']) {
+      if (!on(kind)) continue;
+      const ns = 1 + (rng() < 0.4 ? 1 : 0);
       for (let i = 0, k = 0; i < 40 && k < ns; i++) {
         const r = rng.range(Math.floor(R * 0.3), R - 2), c = rng.int(C);
-        if (cells[r][c] && cells[r][c].kind === 'block') { cells[r][c] = { kind: rng() < 0.55 ? 'cbomb' : 'lblast', color: cells[r][c].color }; k++; }
+        if (cells[r][c] && cells[r][c].kind === 'block') { cells[r][c] = { kind, color: cells[r][c].color }; k++; }
       }
     }
     // candados y llave en cristal (84% en su tramo) desde el 20
-    if (n === 20 || (n > 20 && rng() < 0.45)) {
+    if (on('lock')) {
       const nl = 2 + Math.round(d * 3);
       for (let i = 0, k = 0; i < 60 && k < nl; i++) {
         const r = rng.range(Math.floor(R * 0.4), R - 2), c = rng.int(C);
@@ -768,8 +807,8 @@ const GAME = {
       }
     }
     // rotobomba (37%) desde el 32 y cubo de pintura (43%) desde el 36
-    for (const [kind, from, prob] of [['roto', 32, 0.35], ['paint', 36, 0.4]]) {
-      if (n === from || (n > from && rng() < prob)) {
+    for (const kind of ['roto', 'paint']) {
+      if (on(kind)) {
         for (let i = 0; i < 40; i++) {
           const r = rng.range(Math.floor(R * 0.3), R - 2), c = rng.int(C);
           if (cells[r][c] && cells[r][c].kind === 'block' && !cells[r][c].virus) { cells[r][c] = kind === 'roto' ? { kind, color: cells[r][c].color, dir: rng.int(4) } : { kind, color: cells[r][c].color }; break; }
@@ -777,7 +816,7 @@ const GAME = {
       }
     }
     // alambrador (31%) desde el 40, con algunos bloques ya alambrados
-    if (n === 40 || (n > 40 && rng() < 0.3)) {
+    if (on('freezer')) {
       for (let i = 0; i < 40; i++) {
         const r = rng.range(Math.floor(R * 0.5), R - 2), c = rng.int(C);
         if (cells[r][c] && cells[r][c].kind === 'block') {
@@ -787,14 +826,16 @@ const GAME = {
         }
       }
     }
+    // bloques alambrados sueltos (en Pet Rescue salen desde el 51, antes que el alambrador)
+    if (n < INTRO.freezer && on('wire')) for (let i = 0, k = 0; i < 60 && k < 3 + Math.round(d * 3); i++) { const r = rng.range(Math.floor(R * 0.4), R - 1), c = rng.int(C), o = cells[r][c]; if (o && o.kind === 'block' && !o.wire) { o.wire = 1; k++; } }
     // empujabloques direccional (44), diamantes en cristal (48), bloques multiplicadores (52), arcoíris (56) y transportines (60)
-    if (n === 44 || (n > 44 && rng() < 0.3)) for (let i = 0; i < 40; i++) { const r = rng.range(Math.floor(R * 0.3), R - 2), c = rng.int(C); if (cells[r][c] && cells[r][c].kind === 'block') { cells[r][c] = { kind: 'dblast', color: cells[r][c].color, dir: rng.pick([1, 3, 0]) }; break; } }
-    if (n === 48 || (n > 48 && rng() < 0.4)) for (let i = 0, k = 0; i < 40 && k < 1 + (d > 0.5 ? 1 : 0); i++) { const r = rng.range(Math.floor(R * 0.15), Math.floor(R * 0.5)), c = rng.int(C); if (cells[r][c] && cells[r][c].kind === 'block') { cells[r][c] = { kind: 'gdiam' }; k++; } }
-    if (n === 52 || (n > 52 && rng() < 0.25)) for (let i = 0, k = 0; i < 40 && k < 2; i++) { const r = rng.range(Math.floor(R * 0.3), R - 1), c = rng.int(C); if (cells[r][c] && cells[r][c].kind === 'block' && !cells[r][c].mult) { cells[r][c].mult = 2; k++; } }
-    if (n === 56 || (n > 56 && rng() < 0.27)) for (let i = 0, k = 0; i < 40 && k < 2; i++) { const r = rng.range(Math.floor(R * 0.3), R - 1), c = rng.int(C); if (cells[r][c] && cells[r][c].kind === 'block' && !cells[r][c].mult) { cells[r][c].rainbow = true; k++; } }
-    if (!classic && (n === 60 || (n > 60 && rng() < 0.3))) for (let i = 0; i < 40; i++) { const r = rng.range(Math.floor(R * 0.35), R - 3), c = rng.int(C); if (cells[r][c] && cells[r][c].kind === 'block') { cells[r][c] = { kind: 'cage', carrier: true, pet: rng.pick(petTypes), hp: 1 }; cages++; break; } }
+    if (on('dblast')) for (let i = 0; i < 40; i++) { const r = rng.range(Math.floor(R * 0.3), R - 2), c = rng.int(C); if (cells[r][c] && cells[r][c].kind === 'block') { cells[r][c] = { kind: 'dblast', color: cells[r][c].color, dir: rng.pick([1, 3, 0]) }; break; } }
+    if (on('gdiam')) for (let i = 0, k = 0; i < 40 && k < 1 + (d > 0.5 ? 1 : 0); i++) { const r = rng.range(Math.floor(R * 0.15), Math.floor(R * 0.5)), c = rng.int(C); if (cells[r][c] && cells[r][c].kind === 'block') { cells[r][c] = { kind: 'gdiam' }; k++; } }
+    if (on('mult')) for (let i = 0, k = 0; i < 40 && k < 2; i++) { const r = rng.range(Math.floor(R * 0.3), R - 1), c = rng.int(C); if (cells[r][c] && cells[r][c].kind === 'block' && !cells[r][c].mult) { cells[r][c].mult = 2; k++; } }
+    if (on('rainbow')) for (let i = 0, k = 0; i < 40 && k < 2; i++) { const r = rng.range(Math.floor(R * 0.3), R - 1), c = rng.int(C); if (cells[r][c] && cells[r][c].kind === 'block' && !cells[r][c].mult) { cells[r][c].rainbow = true; k++; } }
+    if (!classic && on('carrier')) for (let i = 0; i < 40; i++) { const r = rng.range(Math.floor(R * 0.35), R - 3), c = rng.int(C); if (cells[r][c] && cells[r][c].kind === 'block') { cells[r][c] = { kind: 'cage', carrier: true, pet: rng.pick(petTypes), hp: 1 }; cages++; break; } }
     // virus (47% en su tramo) desde el 26
-    if (n === 26 || (n > 26 && rng() < 0.4)) {
+    if (on('virus')) {
       const nv = 1 + Math.round(d * 2);
       for (let i = 0, k = 0; i < 40 && k < nv; i++) {
         const r = rng.range(Math.floor(R * 0.4), R - 2), c = rng.int(C);
@@ -802,7 +843,7 @@ const GAME = {
       }
     }
     // cajas de hielo y fuego (64): como en sus niveles, el hielo arriba y el fuego abajo, con bloques en medio
-    if (n === 64 || (n > 64 && rng() < 0.2)) {
+    if (on('ibox')) {
       const k = 2 + Math.round(d * 2);
       for (const [kind, r0, r1] of [['ibox', Math.floor(R * 0.3), Math.floor(R * 0.5)], ['fbox', Math.floor(R * 0.7), R - 1]]) {
         for (let i = 0, put = 0; i < 60 && put < k; i++) {
@@ -812,52 +853,46 @@ const GAME = {
       }
     }
     // mariposas (68): en un bloque; al combinarlo vuela y lleva una mascota al suelo
-    if (!classic && (n === 68 || (n > 68 && rng() < 0.15))) for (let i = 0, k = 0; i < 60 && k < 1 + (rng() < 0.4 ? 1 : 0); i++) {
+    if (!classic && on('bfly')) for (let i = 0, k = 0; i < 60 && k < 1 + (rng() < 0.4 ? 1 : 0); i++) {
       const r = rng.range(Math.floor(R * 0.5), R - 1), c = rng.int(C), o = cells[r][c];
       if (o && o.kind === 'block' && !o.virus && !o.mult && !o.rainbow && !o.wire) { o.bfly = true; k++; }
     }
     // detonador (72): cuenta atrás de 3 a 5 jugadas; al llegar a 0 explota y ayuda
-    if (n === 72 || (n > 72 && rng() < 0.12)) for (let i = 0, k = 0; i < 60 && k < 2; i++) {
+    if (on('det')) for (let i = 0, k = 0; i < 60 && k < 2; i++) {
       const r = rng.range(Math.floor(R * 0.4), R - 1), c = rng.int(C), o = cells[r][c];
       if (o && o.kind === 'block' && !o.virus && !o.bfly && o.det == null) { o.det = 3 + rng.int(3); k++; }
     }
     // flor de enredadera (76): cubre de enredadera un bloque por jugada; se rompe combinando a su lado
-    if (n === 76 || (n > 76 && rng() < 0.15)) for (let i = 0, k = 0; i < 60 && k < 1 + (d > 0.5 ? 1 : 0); i++) {
+    if (on('vflower')) for (let i = 0, k = 0; i < 60 && k < 1 + (d > 0.5 ? 1 : 0); i++) {
       const r = rng.range(Math.floor(R * 0.4), R - 1), c = rng.int(C), o = cells[r][c];
       if (o && o.kind === 'block' && !o.virus && !o.bfly && o.det == null) { cells[r][c] = { kind: 'vflower', dir: c < C / 2 ? 1 : 3 }; k++; }
     }
     // suelo de piedra con agujeros (80): "¡Las mascotas y los bloques se caen por los agujeros del mapa sin sufrir daño alguno!"
-    if (!refill && (n === 80 || (n > 80 && rng() < 0.15))) {
+    if (!refill && on('wall')) {
       const rs = R - 1 - Math.floor(V * 0.45);
       const holes = new Set();
       for (let r = 0; r < rs; r++) for (let c = 0; c < C; c++) { const o = cells[r][c]; if (o && (o.kind === 'pet' || o.kind === 'cage' || o.kind === 'gdiam' || o.kind === 'gkey' || o.kind === 'gbomb')) holes.add(c); }
       holes.add(rng.int(C));
       if (holes.size < C - 1) for (let c = 0; c < C; c++) if (!holes.has(c)) cells[rs][c] = { kind: 'wall' };
     }
-    const petsToDrop = refill ? Math.round(3 + d * 6 + rng() * 3) : 0; // en modo puntos hay 6–16 mascotas
+    const petsToDrop = refill ? Math.max(2, petsWant - placedPets - cages) : 0; // en modo puntos el resto cae desde arriba
     const goals = classic ? [] : [{ type: 'pet', count: placedPets + cages + petsToDrop, icon: petType }];
-    if (classic) { let nb = 0; for (const row of cells) for (const o of row) if (o && o.kind !== 'pet' && o.kind !== 'wall') nb++; goals.push({ type: 'blocks', count: nb }); }
-    if (!classic && n >= 5 && rng() < 0.3) {
-      const col = rng.int(colors);
-      goals.push({ type: 'color', key: col, count: Math.round((refill ? 18 : 10) + d * 18) });
-    }
+    // clásico e híbrido: despejar todos los bloques (Pet Rescue no tiene objetivos de "recoge X de un color")
+    if (classic || mode === 'hybrid') { let nb = 0; for (const row of cells) for (const o of row) if (o && o.kind !== 'pet' && o.kind !== 'cage' && o.kind !== 'wall') nb++; goals.push({ type: 'blocks', count: nb }); }
     let text = '';
     if (n === 1) text = 'Toca bloques iguales para bajar a los animalitos al suelo';
     if (n === 2) text = 'Los grupos grandes cargan el cohete 🚀. Cuando esté lleno, tócalo';
-    if (n === 6 && refill) text = 'En este nivel van cayendo bloques nuevos desde arriba';
-    if (n === 8) text = 'Baja la bomba de cristal hasta el suelo para que explote';
-    if (n === 12) text = 'Rompe las jaulas explotando bloques a su lado';
-    if (n === 18) text = 'Los bloques negros solo se rompen con bombas y cohetes';
-    if (n === 14) text = 'Toca los bloques especiales: 💥 quita todos los de su color y ↔️ su fila';
-    if (n === 20) text = 'Baja la llave hasta el suelo para abrir los candados 🔒';
-    if (n === 26) text = 'Cuidado con el virus 🦠: si no lo quitas, se contagia a otro bloque';
-    if (n === 32) text = 'La rotobomba gira en cada jugada. Tócala cuando apunte donde quieras';
-    if (n === 36) text = 'Toca el cubo de pintura 🪣 para pintar de su color los bloques de al lado';
-    if (n === 40) text = 'El alambrador pone alambre a sus vecinos: quita bloques al lado para cortarlo';
-    const tx = { 44: 'El empujabloques elimina bloques en una dirección: tócalo', 48: '¡Los diamantes te dan 1000 puntos! Bájalos hasta el suelo', 52: 'Los bloques multiplicadores doblan tus puntos', 56: 'El bloque arcoíris combina con cualquier color', 60: 'Haz combinaciones junto a los transportines para liberar a las mascotas', 64: 'Junta las cajas de hielo con las de fuego para descubrir las bombas que llevan dentro', 68: 'Combina el bloque de la mariposa: volará a llevar una mascota al suelo', 72: 'El detonador cuenta las jugadas: al llegar a 0 explota', 76: 'La flor llena de enredadera los bloques: quita bloques al lado para cortarla', 80: 'Las mascotas y los bloques caen por los agujeros del suelo de piedra sin hacerse daño' };
-    if (tx[n]) text = tx[n];
+    const TX = { refill: 'En este nivel van cayendo bloques nuevos desde arriba', cbomb: 'Toca la bomba de color 💥: quita todos los bloques de su color', gbomb: 'Baja la bomba de cristal hasta el suelo para que explote',
+      gdiam: '¡Los diamantes te dan 1000 puntos! Bájalos hasta el suelo', lock: 'Baja la llave hasta el suelo para abrir los candados 🔒', black: 'Los bloques negros solo se rompen con bombas y cohetes',
+      lblast: 'Toca el rompelíneas ↔️: quita su fila entera', wire: 'Los bloques con alambre no se rompen: quita bloques a su lado para cortarlo', hybrid: 'Salva a los animalitos y despeja todos los bloques',
+      cage: 'Rompe las jaulas explotando bloques a su lado', virus: 'Cuidado con el virus 🦠: si no lo quitas, se contagia a otro bloque', paint: 'Toca el cubo de pintura 🪣 para pintar de su color los bloques de al lado',
+      det: 'El detonador cuenta las jugadas: al llegar a 0 explota', roto: 'La rotobomba gira en cada jugada. Tócala cuando apunte donde quieras', freezer: 'El alambrador pone alambre a sus vecinos: quita bloques al lado para cortarlo',
+      rainbow: 'El bloque arcoíris combina con cualquier color', ibox: 'Junta las cajas de hielo con las de fuego para descubrir las bombas que llevan dentro', dblast: 'El empujabloques elimina bloques en una dirección: tócalo',
+      mult: 'Los bloques multiplicadores doblan tus puntos', carrier: 'Haz combinaciones junto a los transportines para liberar a las mascotas', wall: 'Las mascotas y los bloques caen por los agujeros del suelo de piedra sin hacerse daño',
+      bfly: 'Combina el bloque de la mariposa: volará a llevar una mascota al suelo', vflower: 'La flor llena de enredadera los bloques: quita bloques al lado para cortarla' };
+    for (const k in TX) if (INTRO[k] === n && !text) text = TX[k];
     if (classic && !text) text = '¡Despeja todos los bloques!';
-    const spec = { R, C, V, colors, cells, goals, text, d, refill, petsToDrop, petTypes, bombRate, mode: refill ? 'score' : classic ? 'classic' : 'rescue' };
+    const spec = { R, C, V, colors, cells, goals, text, d, refill, petsToDrop, petTypes, bombRate, mode };
     const a = yield* botRunG(spec, n * 13 + 1), b = yield* botRunG(spec, n * 13 + 2);
     spec.botMoves = Math.max(a.moves, b.moves);
     spec.botScore = Math.min(a.score, b.score);
@@ -878,28 +913,49 @@ const GAME = {
   ];
 
   // ------------------------------------------------------------ partida
+  // textos de la franja de objetivos, con las claves de Pet Rescue: task_rescue_one_pet / task_rescue_several_pets,
+  // task_block_percent y task_target_score (la primera estrella)
+  function introLines(spec) {
+    const L = [];
+    for (const gl of spec.goals || []) {
+      if (gl.type === 'pet') L.push(gl.count === 1 ? 'Rescata 1 mascota.' : 'Rescata ' + gl.count + ' mascotas.');
+      else if (gl.type === 'blocks') L.push('Quita un 100% de los bloques');
+    }
+    if (spec.starScores) L.push('Gana ' + spec.starScores[0] + ' puntos');
+    return L;
+  }
   GAME.newPlay = function (spec) {
+    GAME.mode = spec.mode; // para la música de cada modo
     const S = buildState(spec, E.playSeed != null ? E.playSeed : (Math.random() * 1e9) | 0);
     const P = { S, busy: false };
-    let ts = 60, bx = 0, by = 0, V = spec.V, rackY = 0;
+    let ts = 60, tsy = 60, bx = 0, by = 0, V = spec.V, rackY = 0, rocketX = null; // tsy: alto de fila (en Pet Rescue las casillas son algo más anchas que altas)
     let cam = 0, camTarget = 0;
     const dying = [];
     const fxs = [];
     let hold = 0;
     let hintTiles = null;
-    let rocketAim = false;
+    let rocketAim = false, aimCol = 0, rocketShot = null; // aimCol y rocketShot: apuntado y vuelo del cohete en el dibujo WebGL (como Pet Rescue)
     let chargeShown = 0;
+    // al empezar, la franja con los objetivos (cutscenes/target_scene de Pet Rescue; la dibuja gl.js); mientras está, no se juega
+    const INTRO_T = 2.9;
+    let intro = window.__pasada ? null : { t0: E.t, lines: introLines(spec) };
+    const introOn = () => intro && (E.t - intro.t0 < INTRO_T || (intro = null));
     const cx = (c) => bx + c * ts + ts / 2;
-    const cy = (r) => by + (r - cam) * ts + ts / 2;
+    const cy = (r) => by + (r - cam) * tsy + tsy / 2;
     const all = () => { const a = []; for (let r = 0; r < S.R; r++) for (let c = 0; c < S.C; c++) if (S.grid[r][c]) a.push([S.grid[r][c], r, c]); return a; };
     function updateCam() { camTarget = camFor(S, V); }
 
     P.layout = function (area) {
-      ts = Math.min(area.w / S.C, 76);
-      V = Math.min(S.R, Math.floor((area.h - 110) / ts));
-      bx = area.x + (area.w - ts * S.C) / 2;
-      by = area.y + (area.h - 110 - ts * V) / 2;
-      rackY = by + V * ts + 60;
+      const gl = window.GL && GL.boardLayout && GL.boardLayout(S.C, Math.min(S.R, spec.V || S.R), area); // filas que tiene que enseñar el nivel
+      if (gl) { // con WebGL, las medidas del Pet Rescue real (casilla de 114×104 px en 1080 de ancho, tablero centrado al 49 % del alto)
+        ts = gl.tsx; tsy = gl.tsy; V = gl.V; bx = gl.x; by = gl.y; rackY = gl.rackY; rocketX = gl.rocketX; // el cohete lleno va en el centro, bajo el tablero
+      } else {
+        ts = tsy = Math.min(area.w / S.C, 76);
+        V = Math.min(S.R, Math.floor((area.h - 110) / ts));
+        bx = area.x + (area.w - ts * S.C) / 2;
+        by = area.y + (area.h - 110 - ts * V) / 2;
+        rackY = by + V * ts + 60;
+      }
       updateCam();
       if (!P.placed) {
         P.placed = true;
@@ -919,26 +975,26 @@ const GAME = {
       transform(old, pet, delay) {
         pet.gx = old.gx; pet.gy = old.gy; pet.vy = 0; pet.hidden = delay;
         dying.push({ t: old, delay, age: 0, m: { mode: 'cage' } });
-        E.after(delay, () => { E.floatText(cx(pet.gx), cy(pet.gy) - 20, '¡Libre!', '#ffe14d', 30); E.sfx('collect', 1.3); });
+        E.after(delay, () => E.sfx('collect', 1.3)); // sin texto, como Pet Rescue
       },
       collect(type, key, t, delay) {
         if (type === 'pet') delay = hold;
-        E.after(delay + 0.05, () => { if (E.goal(type, key, 1, cx(t.gx), cy(t.gy))) E.sfx(type === 'pet' ? 'rescue' : 'collect', 1 + Math.random() * 0.2); });
+        E.after(delay + 0.05, () => { if (E.goal(type, key, 1, cx(t.gx), cy(t.gy))) { E.sfx(type === 'pet' ? 'rescue' : 'collect', 1 + Math.random() * 0.2); if (type === 'pet' && t.pet) E.sfx('pet:' + t.pet); } });
       },
       sound(size) { E.sfx('pop', 0.8 + Math.min(size, 10) * 0.05); },
-      bonus(t, pts) { E.after(0.2, () => { E.floatText(cx(t.gx), cy(t.gy) - 30, '+' + pts, '#ffe14d', 34); E.sfx('collect', 1.4); }); },
+      bonus(t, pts) { E.after(0.2, () => { if (!(window.GL && GL.scorePop && GL.scorePop(cx(t.gx), cy(t.gy), '+' + pts))) E.floatText(cx(t.gx), cy(t.gy) - 30, '+' + pts, '#ffe14d', 34); E.sfx('collect', 1.4); }); },
       recolor(t) {
-        if (!t) { E.floatText(E.W / 2, by + V * ts * 0.4, '¡Cohete cargado!', '#fff', 36); return; }
+        if (!t) return; // el cohete lleno ya se ve en su círculo dorado (Pet Rescue no pone texto)
         t.sc = 0.5; E.tween(t, { sc: 1 }, 0.4, { ease: E.ease.outBack }); E.burst(cx(t.gx), cy(t.gy), '#fff', 6, { size: 8 });
       },
       spawn(t, r, c, k) { t.gx = c; t.gy = camFor(S, V) - 1 - k; t.vy = 0; t.delay = 0; },
-      bfly(r, c) { E.after(0.1, () => { E.burst(cx(c), cy(r), ['#7ad7ff', '#ff9ff3', '#fff'], 14, { size: 12, shape: 'star' }); E.floatText(cx(c), cy(r) - 30, '🦋 ¡Al rescate!', '#fff', 30); }); },
+      bfly(r, c) { E.after(0.1, () => { E.burst(cx(c), cy(r), ['#7ad7ff', '#ff9ff3', '#fff'], 14, { size: 12, shape: 'star' }); }); }, // sin texto, como Pet Rescue
     };
 
     function cellAt(x, y) {
-      const c = Math.floor((x - bx) / ts), r = Math.floor((y - by) / ts + cam);
+      const c = Math.floor((x - bx) / ts), r = Math.floor((y - by) / tsy + cam);
       if (c < 0 || c >= S.C || r < 0 || r >= S.R) return null;
-      if (y < by || y > by + V * ts) return null;
+      if (y < by || y > by + V * tsy) return null;
       return [r, c];
     }
     function afterAction() {
@@ -946,17 +1002,22 @@ const GAME = {
       for (const [t] of all()) if (!(t.delay > hold)) t.delay = hold;
       if (!hasMove(S, V)) P.needHelp = true;
     }
-    function rocketHit(x, y) { return Math.hypot(x - (bx + S.C * ts - 40), y - rackY) < 46; }
+    function rocketHit(x, y) { return Math.hypot(x - (rocketX != null ? rocketX : bx + S.C * ts - 40), y - rackY) < (rocketX != null ? 60 : 46); }
     P.down = function (x, y) {
       if (P.busy || P.finaleOn) return;
-      if (rocketHit(x, y)) {
-        if (S.charge >= CHARGE_FULL) { rocketAim = !rocketAim; E.sfx('click'); }
-        else { E.sfx('bad'); E.floatText(x - 60, y - 40, 'Haz grupos grandes para cargarlo', '#fff', 22); }
+      if (rocketHit(x, y) && !(rocketX != null && rocketAim)) {
+        if (S.charge >= CHARGE_FULL) {
+          // WebGL (como Pet Rescue): el cohete aparece de pie en la columna del centro; se cambia tocando el tablero y se dispara con ✓
+          if (rocketX != null) { rocketAim = true; aimCol = Math.floor(S.C / 2); E.sfx('click'); return; }
+          rocketAim = !rocketAim; E.sfx('click');
+        }
+        else E.sfx('bad'); // Pet Rescue no pone texto: el cohete se carga haciendo grupos grandes
         return;
       }
       const rc = cellAt(x, y);
       if (!rc) return;
       const [r, c] = rc;
+      if (rocketAim && rocketX != null) { if (c !== aimCol) { aimCol = c; E.sfx('click'); } return; }
       if (rocketAim) {
         rocketAim = false; S.charge = 0;
         blastColumn(S, c, r, K); E.sfx('rocket'); E.shake(0.2);
@@ -979,12 +1040,12 @@ const GAME = {
         if (!t || t.kind === 'pet') return;
         if (t.kind === 'cage') t.hp = 1;
         damage(S, r, c, 0, K);
-        E.sfx('bomb'); E.shake(0.2);
+        E.sfx(sfxOr('hammer', 'bomb')); E.shake(0.2); fxEv('BlockRemover', cx(c), cy(r)); fxEv('Hammer', cx(c), cy(r));
       } else if (id === 'column') { blastColumn(S, c, r, K); E.sfx('rocket'); }
       else if (id === 'row') {
-        K.fx({ type: 'rocket', dir: 'h', r, c, delay: 0 });
+        K.fx({ type: 'rocket', dir: 'h', r, c, delay: 0, ev: 'booster_lineblast_force' });
         for (let cc = 0; cc < S.C; cc++) damage(S, r, cc, Math.abs(cc - c) * 0.03, K);
-        E.sfx('rocket');
+        E.sfx(sfxOr('line', 'rocket'));
       } else if (id === 'colorpop') {
         const t = S.grid[r][c];
         if (!t || t.kind !== 'block') return;
@@ -996,6 +1057,8 @@ const GAME = {
       afterAction();
     }
     P.booster = function () {};
+    // sonido propio del estilo si lo tiene (p. ej. el muelle del rompelíneas de Pet Rescue); si no, el general
+    function sfxOr(name, alt) { const sm = E.skin('sfx'); return sm && sm[name] ? name : alt; }
     P.rescue = function () { helpOut(S, K, V); E.sfx('magic'); P.dead = false; };
     // "¿Qué es esto?": explicación de la pieza tocada
     P.describe = function (x, y) {
@@ -1056,11 +1119,13 @@ const GAME = {
         if (t.delay > 0) { t.delay -= dt; moving = true; continue; }
         if (Math.abs(t.gx - c) > 0.01) { t.gx += Math.sign(c - t.gx) * Math.min(Math.abs(c - t.gx), 9 * dt); moving = true; } else t.gx = c;
         if (t.gy < r - 0.01) {
-          t.vy = (t.vy || 0) + 50 * dt;
+          t.vy = (t.vy || 0) + TM().gravity * dt;
           t.gy += t.vy * dt;
           moving = true;
-          if (t.gy >= r) { t.gy = r; t.vy = 0; }
+          if (t.gy >= r) { t.gy = r; t.vy = 0; if (TM().bounce) t.bt = 0.13; }
         } else if (t.gy > r) { t.gy = r; t.vy = 0; }
+        // rebote al llegar (Pet Rescue: se pasa un 10% de casilla y vuelve)
+        if (t.bt > 0) { t.bt -= dt; t.oy = t.bt > 0 ? TM().bounce * Math.sin(Math.PI * (1 - t.bt / 0.13)) : 0; }
       }
       for (let i = dying.length - 1; i >= 0; i--) {
         const d = dying[i];
@@ -1077,17 +1142,18 @@ const GAME = {
       for (let i = fxs.length - 1; i >= 0; i--) {
         const f = fxs[i];
         if (f.delay > 0) { f.delay -= dt; continue; }
+        if (!f.age && f.ev) { for (const n of [].concat(f.ev)) fxEv(n, cx(f.c), cy(f.r)); f.skin = !!E.skin('fxEvent'); } // el efecto de Pet Rescue de esa pieza
         f.age += dt;
         if (f.age > 0.6) fxs.splice(i, 1);
       }
       chargeShown += (Math.min(1, S.charge / CHARGE_FULL) - chargeShown) * Math.min(1, dt * 4);
       if (!moving && hold <= 0) updateCam();
       if (Math.abs(cam - camTarget) > 0.001) { cam += (camTarget - cam) * Math.min(1, dt * 4); if (Math.abs(cam - camTarget) < 0.01) cam = camTarget; moving = true; }
-      P.busy = moving || dying.length > 0 || hold > 0 || !!P.finaleOn;
+      P.busy = moving || dying.length > 0 || hold > 0 || !!P.finaleOn || !!introOn();
       if (!P.busy && P.needHelp) {
         P.needHelp = false;
         if (P.goals && P.goals.some((gl) => gl.left > 0)) {
-          E.floatText(E.W / 2, by + V * ts * 0.4, '¡No quedan jugadas!', '#fff', 40);
+          E.floatText(E.W / 2, by + V * tsy * 0.4, '¡No quedan jugadas!', '#fff', 40);
           E.shake(0.3); E.sfx('bomb');
           const cr = crushTop(S, K);
           if (cr.pets) { P.dead = true; P.deadMsg = '¡Se ha perdido una mascota!'; }
@@ -1097,16 +1163,23 @@ const GAME = {
       }
       if (hintTiles) hintTiles.t += dt;
     };
+    // efecto del juego original con su nombre (estilo "Original"); si no lo hay, las chispas de siempre
+    function fxEv(name, x, y, color) { const f = E.skin('fxEvent'); return !!(f && name && f(name, x, y, ts, color)); }
+    const CN = ['Red', 'Blue', 'Green', 'Yellow', 'Purple'];
     function startDeath(d) {
       const t = d.t;
       d.x = cx(t.gx != null ? t.gx : 0); d.y = cy(t.gy != null ? t.gy : 0);
       d.age = 0.0001;
-      if (d.m && d.m.mode === 'crush') { E.burst(d.x, d.y, ['#555', '#999', '#ccc'], 10, { size: 12 }); if (t.kind === 'pet' || t.kind === 'cage') E.floatText(d.x, d.y - 30, '¡Oh, no!', '#ff5050', 30); return; }
-      if (t.kind === 'block') E.burst(d.x, d.y, [COLORS[t.color], E.shade(COLORS[t.color], 0.4)], 7, { size: 11 });
-      else if (t.kind === 'black') E.burst(d.x, d.y, ['#444', '#888'], 10, { size: 12 });
-      else if (t.kind === 'cage') E.burst(d.x, d.y, ['#8a5a2b', '#c98b48', '#e0b07a'], 12, { size: 12 });
-      else if (t.kind === 'pet') { E.floatText(d.x, d.y - 30, '¡Rescatado!', '#ffe14d', 34); E.burst(d.x, d.y, ['#ff6fae', '#ffe14d', '#fff'], 14, { shape: 'star', size: 14 }); }
-      else if (t.kind === 'gbomb') { E.burst(d.x, d.y, ['#ff9f1c', '#ffd23f', '#cfefff'], 18, { size: 14, speed: 400 }); E.shake(0.3); E.sfx('bomb'); }
+      if (d.m && d.m.mode === 'crush') { E.burst(d.x, d.y, ['#555', '#999', '#ccc'], 10, { size: 12 }); return; }
+      if (t.kind === 'block') { if (!fxEv((t.virus ? 'destroyed_infected_block' : 'BlockSmoke' + CN[t.color]), d.x, d.y)) E.burst(d.x, d.y, [COLORS[t.color], E.shade(COLORS[t.color], 0.4)], 7, { size: 11 }); }
+      else if (t.kind === 'black') { if (!fxEv('BlockSmokeBlack', d.x, d.y)) E.burst(d.x, d.y, ['#444', '#888'], 10, { size: 12 }); }
+      else if (t.kind === 'cage') { if (!fxEv(t.hp > 1 ? 'SteelCageBreak' : 'CageBreak', d.x, d.y)) E.burst(d.x, d.y, ['#8a5a2b', '#c98b48', '#e0b07a'], 12, { size: 12 }); }
+      else if (t.kind === 'pet') { if (!(window.GL && GL.scorePop && GL.scorePop(d.x, d.y, '+1000'))) E.floatText(d.x, d.y - 30, '¡Rescatado!', '#ffe14d', 34); if (!fxEv('PetGlitter', d.x, d.y)) E.burst(d.x, d.y, ['#ff6fae', '#ffe14d', '#fff'], 14, { shape: 'star', size: 14 }); }
+      else if (t.kind === 'gbomb') { if (!fxEv('BombBlast', d.x, d.y)) E.burst(d.x, d.y, ['#ff9f1c', '#ffd23f', '#cfefff'], 18, { size: 14, speed: 400 }); E.shake(0.3); E.sfx('bomb'); }
+      else if (t.kind === 'lock') fxEv('lockedblock_unlock', d.x, d.y);
+      else if (t.kind === 'ibox' || t.kind === 'fbox') fxEv('FireIceEffect', d.x, d.y);
+      else if (t.kind === 'vflower') fxEv('flowerblock_death', d.x, d.y);
+      else if (t.kind === 'cbomb' || t.kind === 'lblast' || t.kind === 'paint' || t.kind === 'roto') fxEv('BlockSmoke' + CN[t.color || 0], d.x, d.y);
     }
 
     P.draw = function (g) {
@@ -1132,7 +1205,7 @@ const GAME = {
       for (let r = 0; r < S.R; r++) for (let c = 0; c < S.C; c++) {
         const t = S.grid[r][c];
         if (!t || t.gx == null || t.hidden > 0) continue;
-        const x = cx(t.gx), y = cy(t.gy);
+        const x = cx(t.gx), y = cy(t.gy + (t.oy || 0));
         if (y < top - ts || y > bottom + ts) continue;
         if (hset && hset.has(t)) { const k = 1 + Math.abs(Math.sin(hintTiles.t * 5)) * 0.12; const o = t.sc; t.sc = (o == null ? 1 : o) * k; drawTile(g, t, x, y, ts); t.sc = o; }
         else drawTile(g, t, x, y, ts);
@@ -1143,6 +1216,12 @@ const GAME = {
         if (d.age <= 0) { if (t.gx != null) drawTile(g, t, cx(t.gx), cy(t.gy), ts); continue; }
         const k = Math.min(1, d.age / 0.25);
         const o = t.sc;
+        if (TM().brighten && !(d.m && d.m.mode === 'pet') && !(d.m && d.m.mode === 'crush')) {
+          // como Pet Rescue: el bloque se ilumina un momento y luego desaparece de golpe (queda el humo)
+          const b = TM().brighten;
+          if (d.age < b) { drawTile(g, t, d.x, d.y, ts); g.save(); g.globalCompositeOperation = 'lighter'; g.globalAlpha = 0.55 * (d.age / b); drawTile(g, t, d.x, d.y, ts); g.restore(); }
+          continue;
+        }
         if (d.m && d.m.mode === 'pet') { const kk = Math.min(1, d.age / 0.7); t.sc = 1 + kk * 0.6; t.alpha = 1 - kk; drawTile(g, t, d.x, d.y - kk * 90, ts); }
         else { t.sc = 1 + k * 0.3; t.alpha = 1 - k; drawTile(g, t, d.x, d.y, ts); }
         t.sc = o; t.alpha = 1;
@@ -1182,35 +1261,52 @@ const GAME = {
       if (rocketAim) E.text(g, 'Toca la columna que quieres limpiar', E.W / 2, top + 26, 24, '#fff', { stroke: '#c75a00', sw: 6 });
     };
     P.cellXY = (r, c) => [cx(c), cy(r)];
-    P.rocketXY = () => [bx + S.C * ts - 40, rackY];
-    // Al ganar, los grupos que quedan explotan solos y dan 10·n² puntos cada uno
+    // botones ✓ y ✗ del apuntado (WebGL)
+    P.fireRocket = function () {
+      if (!rocketAim || P.busy) return;
+      const r = Math.max(0, Math.min(S.R - 1, Math.floor(cam) + V - 1)); // desde abajo de lo que se ve
+      rocketAim = false; S.charge = 0; rocketShot = { c: aimCol, t0: E.t };
+      blastColumn(S, aimCol, r, K); E.sfx('rocket'); E.shake(0.2);
+      settle(S, K); afterAction();
+    };
+    P.cancelRocket = function () { if (rocketAim) { rocketAim = false; E.sfx('click'); } };
+    // lo que necesita el dibujo con WebGL (games/mascotas/gl.js) para pintar el tablero
+    P.glState = () => ({ S, ts, tsy, bx, by, V, cam, rackY, dying, fxs, hintTiles, rocketAim, aimCol, rocketShot, chargeShown, endSeq, intro: introOn() ? intro : null, full: S.charge >= CHARGE_FULL, cx, cy, drawTile, TM: TM() });
+    P.rocketXY = () => [rocketX != null ? rocketX : bx + S.C * ts - 40, rackY];
+    // Al ganar, como Pet Rescue (grabado en el emulador): el tablero se queda como está, sin premio por los bloques que
+    // quedan. Primero "¡Mascotas rescatadas!" con su nube (CPRTargetMetSequence: escena cutscenes/pets_rescued_scene,
+    // efecto "fancy" al 47 % del alto), una pausa con el tablero quieto y luego la secuencia final
+    // (CGameTaskEndSequenceV2MainAnimation: escena end_level_sequence y su línea de tiempo de 2,2 s; la dibuja gl.js).
+    // Los efectos de esa línea de tiempo van en unidades de su AnimationLayout (1018×669, a escala uniforme que cubre la
+    // pantalla: en vertical manda el alto).
+    let endSeq = null;
+    const END = { rescued: 2.5, pause: 1.5, seq: 2.6 }; // la escena de "¡Mascotas rescatadas!" dura 2,5 s; la pausa, medida en el vídeo
+    const LU = () => Math.max(E.W / 1018, E.H / 669); // unidad del AnimationLayout en unidades del juego
+    function fxAt(name, x, y, k) { const f = E.skin('fxEvent'); return !!(f && f(name, x, y, LU() * 70 * k)); } // k: escala sobre la unidad del AnimationLayout
     P.finale = function (done) {
-      E.floatText(E.W / 2, by + ts * 2, '¡Todos a salvo!', '#ffe14d', 46);
-      E.sfx('rescue');
       P.finaleOn = true;
-      let k = 0;
-      const step = () => {
-        if (hold > 0 || dying.length) { E.after(0.1, step); return; }
-        let best = null;
-        const seen = new Set();
-        for (let r = 0; r < S.R; r++) for (let c = 0; c < S.C; c++) {
-          const o = S.grid[r][c];
-          if (!o || o.kind !== 'block' || seen.has(o)) continue;
-          const g = group(S, r, c); g.forEach(([rr, cc]) => seen.add(S.grid[rr][cc]));
-          if (g.length >= 2 && (!best || g.length > best.length)) best = g;
-        }
-        if (!best || k >= 12) { E.after(0.4, () => { P.finaleOn = false; done(); }); return; }
-        k++;
-        const pts = 10 * best.length * best.length;
-        const [r0, c0] = best[0];
-        best.forEach(([rr, cc], i) => { const t = S.grid[rr][cc]; S.grid[rr][cc] = null; K.remove(t, i * 0.02); });
-        S.score = (S.score || 0) + pts;
-        E.floatText(cx(c0), cy(r0) - 20, '+' + pts, '#ffe14d', 32);
-        E.sfx('pop', 1 + k * 0.04);
-        settle(S, K);
-        E.after(0.3, step);
+      const seq = (endSeq = { t0: 0 });
+      let finished = false;
+      const finish = () => { if (finished) return; finished = true; P.finaleOn = false; endSeq = null; done(); };
+      P.skipFinale = finish;
+      if (window.__pasada) { finish(); return; } // los robots no esperan la animación
+      const start = () => {
+        if (finished) return;
+        if (hold > 0 || dying.length) { E.after(0.1, start); return; }
+        seq.t0 = E.t; E.sfx('rescue');
+        fxAt('pets_smoke', E.W / 2, E.H * 0.47, 1); // el efecto con el sonido "pets_rescued": humo azul, estrellas y onda
+        E.after(END.rescued + END.pause, () => {
+          if (finished) return;
+          seq.t1 = E.t; const u = LU(), cx0 = E.W / 2, cy0 = E.H / 2;
+          fxAt('endLevelExplosion', cx0, cy0, 1);
+          fxAt('petopia_FTUE_confetti_1', cx0, 0, 1);
+          // EffectTrigger de end_level_sequence_timeline: [momento, efecto, x, y] (y hacia arriba)
+          for (const [t, n, x, y] of [[0.023, 'Fireworks_1', 300, 200], [0.145, 'Fireworks_4', -200, 400], [0.371, 'Fireworks_1', -150, -350], [0.795, 'Fireworks_5', 200, -400], [1.227, 'Fireworks_5', 50, 350]])
+            E.after(t, () => { if (!finished) fxAt(n, cx0 + x * u, cy0 - y * u, 1); });
+          E.after(END.seq, finish);
+        });
       };
-      E.after(0.8, step);
+      E.after(0.3, start);
     };
     return P;
   };

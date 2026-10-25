@@ -1,4 +1,94 @@
 'use strict';
+// Reproductor mínimo de esqueletos Spine 4.0 (formato JSON), hecho para este proyecto.
+// Soporta huesos (giro, posición, escala, cizalla), imágenes de región, cambio de imagen y color de las ranuras,
+// y animaciones por claves (lineales o escalonadas). Las mallas deformables no se dibujan.
+const SpineLite = (function () {
+  const D2R = Math.PI / 180;
+  function Skeleton(data, skinName, images) {
+    this.data = data; this.images = images;
+    this.bones = data.bones.map((b) => ({ d: b, parent: null, x: 0, y: 0, rot: 0, sx: 1, sy: 1, shx: 0, shy: 0, a: 1, b: 0, c: 0, dd: 1, wx: 0, wy: 0 }));
+    const byName = {}; this.bones.forEach((b) => { byName[b.d.name] = b; });
+    this.bones.forEach((b) => { if (b.d.parent) b.parent = byName[b.d.parent]; });
+    this.boneByName = byName;
+    // imágenes: la piel elegida encima de la de por defecto
+    this.att = {};
+    for (const sk of data.skins) if (sk.name === 'default' || sk.name === skinName) for (const [slot, atts] of Object.entries(sk.attachments || {})) {
+      this.att[slot] = Object.assign(this.att[slot] || {}, atts);
+    }
+    this.slots = data.slots.map((s) => ({ d: s, bone: byName[s.bone], att: s.attachment || null, col: hex(s.color) }));
+    this.slotByName = {}; this.slots.forEach((s) => { this.slotByName[s.d.name] = s; });
+    this.order = this.slots.slice();
+    this.setup();
+  }
+  function hex(h) { if (!h) return [1, 1, 1, 1]; return [0, 2, 4, 6].map((i) => parseInt(h.substr(i, 2) || 'ff', 16) / 255); }
+  Skeleton.prototype.setup = function () {
+    for (const b of this.bones) { const d = b.d; b.x = d.x || 0; b.y = d.y || 0; b.rot = d.rotation || 0; b.sx = d.scaleX == null ? 1 : d.scaleX; b.sy = d.scaleY == null ? 1 : d.scaleY; b.shx = d.shearX || 0; b.shy = d.shearY || 0; }
+    for (const s of this.slots) { s.att = s.d.attachment || null; s.col = hex(s.d.color); }
+  };
+  // valor de una pista en el tiempo t (claves con time; sin time = 0)
+  function sample(keys, t, fields, defs) {
+    let i = 0; while (i < keys.length - 1 && (keys[i + 1].time || 0) <= t) i++;
+    const k0 = keys[i], t0 = k0.time || 0;
+    const val = (k, f, j) => (k[f] == null ? defs[j] : k[f]);
+    if (i === keys.length - 1 || t < t0 || k0.curve === 'stepped') return fields.map((f, j) => val(k0, f, j));
+    const k1 = keys[i + 1], t1 = k1.time || 0, q = (t - t0) / Math.max(1e-6, t1 - t0);
+    return fields.map((f, j) => val(k0, f, j) + (val(k1, f, j) - val(k0, f, j)) * q);
+  }
+  Skeleton.prototype.apply = function (anim, t) {
+    const A = this.data.animations[anim]; if (!A) return;
+    this.setup();
+    for (const [bn, tl] of Object.entries(A.bones || {})) {
+      const b = this.boneByName[bn]; if (!b) continue; const d = b.d;
+      if (tl.rotate) b.rot = (d.rotation || 0) + sample(tl.rotate, t, ['value'], [0])[0];
+      if (tl.translate) { const v = sample(tl.translate, t, ['x', 'y'], [0, 0]); b.x = (d.x || 0) + v[0]; b.y = (d.y || 0) + v[1]; }
+      if (tl.scale) { const v = sample(tl.scale, t, ['x', 'y'], [1, 1]); b.sx = (d.scaleX == null ? 1 : d.scaleX) * v[0]; b.sy = (d.scaleY == null ? 1 : d.scaleY) * v[1]; }
+      if (tl.shear) { const v = sample(tl.shear, t, ['x', 'y'], [0, 0]); b.shx = (d.shearX || 0) + v[0]; b.shy = (d.shearY || 0) + v[1]; }
+    }
+    for (const [sn, tl] of Object.entries(A.slots || {})) {
+      const s = this.slotByName[sn]; if (!s) continue;
+      if (tl.attachment) { let k = null; for (const kf of tl.attachment) if ((kf.time || 0) <= t) k = kf; if (k) s.att = k.name || null; }
+      if (tl.rgba) { let i = 0; while (i < tl.rgba.length - 1 && (tl.rgba[i + 1].time || 0) <= t) i++; s.col = hex(tl.rgba[i].color); }
+    }
+  };
+  Skeleton.prototype.duration = function (anim) {
+    const A = this.data.animations[anim]; let m = 0; if (!A) return 0;
+    const scan = (o) => { if (Array.isArray(o)) o.forEach((k) => { if (k && k.time > m) m = k.time; }); else if (o && typeof o === 'object') Object.values(o).forEach(scan); };
+    scan(A); return m;
+  };
+  Skeleton.prototype.update = function () {
+    for (const b of this.bones) {
+      const ra = (b.rot + b.shx) * D2R, rb = (b.rot + 90 + b.shy) * D2R;
+      const la = Math.cos(ra) * b.sx, lb = Math.cos(rb) * b.sy, lc = Math.sin(ra) * b.sx, ld = Math.sin(rb) * b.sy;
+      const p = b.parent;
+      if (!p) { b.a = la; b.b = lb; b.c = lc; b.dd = ld; b.wx = b.x; b.wy = b.y; continue; }
+      b.a = p.a * la + p.b * lc; b.b = p.a * lb + p.b * ld; b.c = p.c * la + p.dd * lc; b.dd = p.c * lb + p.dd * ld;
+      b.wx = p.a * b.x + p.b * b.y + p.wx; b.wy = p.c * b.x + p.dd * b.y + p.wy;
+    }
+  };
+  // dibuja con el origen del esqueleto en (x,y) y la escala dada (Spine tiene el eje Y hacia arriba)
+  Skeleton.prototype.draw = function (g, x, y, scale) {
+    this.update();
+    const m0 = g.getTransform();
+    for (const s of this.order) {
+      if (!s.att) continue;
+      const at = (this.att[s.d.name] || {})[s.att]; if (!at || (at.type && at.type !== 'region')) continue;
+      const im = this.images(at.path || at.name || s.att); if (!im) continue;
+      const b = s.bone;
+      g.save();
+      g.globalAlpha = s.col[3];
+      g.setTransform(m0);
+      g.translate(x, y); g.scale(scale, -scale);
+      g.transform(b.a, b.c, b.b, b.dd, b.wx, b.wy);
+      g.translate(at.x || 0, at.y || 0); g.rotate((at.rotation || 0) * D2R); g.scale(at.scaleX == null ? 1 : at.scaleX, at.scaleY == null ? 1 : at.scaleY);
+      const w = at.width || im.width, h = at.height || im.height;
+      g.scale(1, -1);
+      g.drawImage(im, -w / 2, -h / 2, w, h);
+      g.restore();
+    }
+  };
+  return { Skeleton };
+})();
+'use strict';
 // Partes comunes del estilo 'nueva' (patio andaluz): interfaz de cerámica blanca con cenefa azul,
 // fondo de patio con macetas y mapa por un pueblo blanco. Cada juego añade sus piezas en su skins.js.
 const NUEVA = (function () {
@@ -292,30 +382,166 @@ GAME.skins = {};
 
 // ================================================================ 'real' (en Ajustes: "Original")
 // Imágenes de Pet Rescue que solo están en la tablet (privado/, dentro del APK; nunca se publican).
-// Los animalitos de Pet Rescue son texturas 3D y no sirven: siguen como en 'original'.
+// Los animalitos de Pet Rescue son modelos 3D: tools/privado.py los renderiza a imagen (tools/king_ffm.py).
 (function () {
   const O = GAME.skins.original;
   const N = [];
   for (let i = 0; i < 5; i++) N.push('b' + i, 'cb' + i, 'paint' + i);
   N.push('carrier1', 'carrier2', 'carrier3', 'ibox', 'fbox', 'black', 'lock', 'mesh1', 'mesh2', 'cage');
+  // cada emoji de animalito de Rescate Animal con su mascota de Pet Rescue
+  const PET = { '🐶': 'puppy', '🐱': 'kitten', '🐰': 'blackcat', '🐷': 'piglet', '🐼': 'panda', '🐹': 'hedgehog', '🐸': 'turtle', '🐵': 'squirrel', '🐨': 'seal', '🦊': 'ferret' };
+  for (const k in PET) N.push('pet_' + PET[k]);
   const fit = (name, k) => (g, w, h) => {
     const im = E.img(name); if (!im) return;
     const s = Math.min((w * k) / im.width, (h * k) / im.height);
     g.drawImage(im, (w - im.width * s) / 2, (h - im.height * s) / 2, im.width * s, im.height * s);
   };
   const spr = (n, ts, k) => E.sprite('img' + n, ts, ts, fit(n, k));
-  const Rl = (GAME.skins.real = Object.assign({}, O, { images: N }));
+  const Rl = (GAME.skins.real = Object.assign({}, O, { images: N, emoji: Object.assign({}, O.emoji) }));
+
+  const MAPIMG = (z) => 'map_' + (z % 3) + '.jpg';
+  Rl.images = Rl.images.concat(['map_0.jpg', 'map_1.jpg', 'map_2.jpg'].filter((n) => !Rl.images.includes(n)));
+  // mapa: cada mundo con su fondo del juego original, a lo ancho de la pantalla (sin los adornos de emoji)
+  Rl.mapNoDecor = true;
+  Rl.mapBg = (g, top, zoneH) => {
+    const z0 = Math.floor(top / zoneH);
+    for (let z = z0 - 1; z <= z0 + 1; z++) {
+      if (z < 0) continue;
+      const zy = -z * zoneH - zoneH + top + E.H, im = E.img(MAPIMG(z)); if (!im) return O.mapBg ? O.mapBg(g, top, zoneH) : null;
+      const s = Math.max(E.W / im.width, zoneH / im.height); g.drawImage(im, (E.W - im.width * s) / 2, zy + (zoneH - im.height * s) / 2, im.width * s, im.height * s);
+    }
+  };
+  for (const k in PET) Rl.emoji[k] = fit('pet_' + PET[k], 1.0);
+  // potenciadores de partida con sus piezas de Pet Rescue
+  Rl.images.push('ui_ico_arrow');
+  Object.assign(Rl.emoji, { '⬇️': fit('ui_ico_arrow', 0.95), '🧱': fit('b0', 0.95), '⚙️': fit('ui_settings', 0.85), '↔️': fit('lblast', 0.95), '💥': fit('cb0', 0.95), '🚀': fit('ui_booster_round_rocket', 0.95), '🎈': fit('ui_booster_round_colourpop', 0.95), '🔨': fit('ui_booster_round_hammer', 0.95) });
+  // mascotas animadas con sus animaciones de Pet Rescue (tools/king_ffa.py): reposo y, si caen, la de caída
+  Rl.images = Rl.images.concat(Object.values(PET).map((k) => 'pet_' + k + '.webp'));
+  Rl.scripts = (Rl.scripts || []).concat(Object.values(PET).map((k) => 'pet_' + k + '.js'));
+  Rl.petAnim = (g, t, ps) => {
+    const k = PET[t.pet]; const M = k && window['PET_' + k.toUpperCase()], sh = M && E.img('pet_' + k + '.webp'); if (!sh) return false;
+    const an = (t.vy > 3 && M.anims.fall) || M.anims.idle; if (!an) return false;
+    const f = an[Math.floor((E.t + ((t.id || 0) % 7) * 0.31) * M.fps) % an.length];
+    const d = ps * 1.45; g.drawImage(sh, (f % M.cols) * M.w, Math.floor(f / M.cols) * M.h, M.w, M.h, -d / 2, -d / 2, d, d);
+    return true;
+  };
+  // sonidos de Pet Rescue con los nombres de su tabla (sound_containers.xml → sounds.xml): HappyChime al quitar un grupo,
+  // BlockLand al caer, ColumnBlast el cohete, ColorPop la bomba de color, PetReleased al salvar una mascota...
+  Rl.sfx = {
+    pop: ['square_removed1'], land: ['block_land_a', 'block_land_b', 'block_land_c'], bad: ['click_wrong'], click: ['button_press'],
+    bomb: ['bomb'], rocket: ['column_blast'], magic: ['color_bomb'], collect: (p) => ['ding' + Math.max(1, Math.min(8, Math.round((p - 1) * 10) + 1))],
+    rescue: ['pet_released'], star: ['stars_one'], win: ['stinger_win'], lose: ['stinger_fail'], shuffle: ['whosh_1'],
+  };  // ventanas, estrellas y regalo con los sonidos de Pet Rescue
+  Object.assign(Rl.sfx, { popIn: ['Generic_Swoosh_PopUp_In'], popOut: ['Generic_Swoosh_PopUp_Out'], star: (p) => [['stars_one', 'stars_two', 'stars_three'][Math.max(0, Math.min(2, Math.round((p - 1) / 0.2)))]], wheelWin: ['Daily_Gift_Gift_Added'] });
+
+  Rl.wheel = { colors: ['#e8322b', '#2f7ee0', '#3cb93c', '#ffcc1a', '#9a4fd6', '#ff8a1f'], rim: '#21a3f0', hub: '#ffffff', arrowColor: '#e8459a' }; // ruleta con los colores de los bloques
+  // la voz de cada mascota al rescatarla (DogHappy, CatHappy... de Pet Rescue)
+  const VOZ = { '🐶': 'dog', '🐱': 'cat', '🐰': 'rabbit', '🐷': 'pig', '🐼': 'panda', '🐹': 'hedgehog', '🐸': 'turtle', '🐵': 'squirrel', '🐨': 'seal', '🦊': 'ferret' };
+  for (const [e, v] of Object.entries(VOZ)) Rl.sfx['pet:' + e] = [v + '_happy'];
+  // volúmenes de su tabla de sonidos (sound_containers.xml, en dB): el golpe de cada bloque al caer va 15 dB por debajo
+  // efectos → sonidos según su effects.xml: el rompelíneas suena a muelle (LineBlast = spring), el cascabloques es BlockRemover,
+  // los botones TapDown; volúmenes de audio_containers.xml
+  Object.assign(Rl.sfx, { line: ['spring'], hammer: ['block_remover'], click: ['button_down'] });
+  Rl.sfxVol = { block_land_a: -15, block_land_b: -15, block_land_c: -15, click_wrong: -15, bomb: -4, column_blast: -4, color_bomb: -2, pet_released: -5, spring: -5,
+    block_remover: -2, steel_cage_break: -4, wood_cage_break: -4, key_chain: -5, glass_breaking: -6, unfrozen: -2, pets_rescued: -2 };
+  // ---- interfaz con las piezas de Pet Rescue (tools/privado.py → ui_*.png) y su fuente CurseCasual
+  const UI = ['game_hud_banner', 'game_hud_banner_top', 'game_hud_moves', 'booster_round_back', 'booster_frame', 'booster_round_hammer', 'booster_round_rocket',
+    'booster_round_blaster', 'booster_round_colourpop', 'btn_green', 'btn_grey', 'btn_gold', 'btn_hard', 'btn_superhard', 'btn_secondary', 'btn_primary', 'btn_red',
+    'menu_blue_button', 'popup_normal_background_white', 'ribbon_long', 'settings', 'default_start_bg', 'default_start_cloud', 'game_hud_star_full', 'game_hud_star_empty'];
+  Rl.images = Rl.images.concat(UI.map((n) => 'ui_' + n));
+  Rl.font = 'font.ttf';
+  Rl.theme = Object.assign({}, O.theme, { accent: '#21a3f0', ribbon: '#e8459a', hudText: '#1d3d7a', hudLabel: '#1d3d7a', movesColor: '#ffffff', movesStroke: '#0f3a85', popText: '#1d3d7a' });
+  const img = (n) => E.img('ui_' + n);
+  // fondo: el prado de la pantalla de inicio de Pet Rescue con su cielo
+  Rl.playBg = (g, w, h) => {
+    const im = img('default_start_bg'); if (!im) return O.playBg(g, w, h);
+    const gr = g.createLinearGradient(0, 0, 0, h * 0.4); gr.addColorStop(0, '#5fc4ff'); gr.addColorStop(1, '#c9ecff'); g.fillStyle = gr; g.fillRect(0, 0, w, h);
+    const s = Math.max(w / im.width, (h * 0.75) / im.height); g.drawImage(im, (w - im.width * s) / 2, h - im.height * s, im.width * s, im.height * s);
+    const cl = img('default_start_cloud'); if (cl) for (const [x, y, k] of [[0.12, 0.05, 1.2], [0.7, 0.1, 1.5]]) g.drawImage(cl, w * x, h * y, cl.width * k, cl.height * k);
+  };
+  // cabecera: banda crema de Pet Rescue con la franja azul arriba, caja de movimientos azul y aro dorado del retrato
+  Rl.hud = (g, W, H) => {
+    const bn = img('game_hud_banner'), top = img('game_hud_banner_top');
+    if (!bn) return O.hud(g, W, H);
+    E.nine(g, bn, 2, -24, W - 4, H + 18, 50, 50);
+    if (top) for (let x = 20; x < W - 20; x += top.width) g.drawImage(top, x, -24, top.width, 30);
+    E.rr(g, 18, 46, 308, H - 62, 16); g.fillStyle = 'rgba(255,255,255,0.65)'; g.fill();
+    // caja de movimientos azul con borde celeste (los colores de game_hud_moves)
+    E.rr(g, W - 178, 44, 162, H - 58, 18); g.fillStyle = '#3fd0f5'; g.fill();
+    E.rr(g, W - 172, 50, 150, H - 70, 14); const gm = g.createLinearGradient(0, 50, 0, H - 20); gm.addColorStop(0, '#2f7ee0'); gm.addColorStop(1, '#1b4fa8'); g.fillStyle = gm; g.fill();
+    const ring = img('booster_round_back'), ax = W / 2 + 40, ay = H / 2 - 4; if (ring) g.drawImage(ring, ax - 60, ay - 60, 120, 120);
+  };
+  // tablero sin marco, como en Pet Rescue: un velo claro detrás de los bloques
+  Rl.board = (g, x, y, w, h) => { E.rr(g, x - 6, y - 6, w + 12, h + 12, 18); g.fillStyle = 'rgba(255,255,255,0.35)'; g.fill(); };
+  Rl.bar = (g, y, W, H) => { const bn = img('game_hud_banner'); if (!bn) return O.bar(g, y, W, H); E.nine(g, bn, -6, y, W + 12, H + 30, 50, 50); };
+  // ventanas blancas de borde azul con la cinta rosa del título
+  Rl.panel = (g, x, y, w, h, opt) => { const im = img('popup_normal_background_white'); if (!im) return O.panel(g, x, y, w, h, opt); E.rr(g, x - 6, y - 6, w + 12, h + 12, 40); g.fillStyle = '#21a3f0'; g.fill(); E.nine(g, im, x, y, w, h, 44, 44); };
+  Rl.ribbon = (g, x, y, w, h) => { const im = img('ribbon_long'); if (im) E.nine(g, im, x - 10, y - 4, w + 20, h + 14, 150, 80); };
+  // botones de Pet Rescue: verde, rojo, dorado, gris y morado (los difíciles); los redondos, azules
+  const BTN = { '#3cb93c': 'btn_green', '#e8453c': 'btn_superhard', '#e8322b': 'btn_superhard', '#d62a2a': 'btn_superhard', '#ff8a1f': 'btn_gold', '#8a5cd6': 'btn_hard', '#9aa3ad': 'btn_grey', '#8a96a3': 'btn_grey', '#b9c0c8': 'btn_grey' };
+  Rl.btnStroke = (color) => ({ btn_green: '#1a6a1a', btn_superhard: '#7a1010', btn_gold: '#8a4a00', btn_hard: '#4a1070', btn_grey: '#4a4f58' })[BTN[color]] || '#0f3a85';
+  Rl.button = (g, x, y, w, h, color, down, r) => {
+    const round = Math.abs(w - h) < 4 || (w <= 120 && h <= 100);
+    // los demás colores: el botón gris de Pet Rescue teñido de azul
+    const im = round ? img('btn_secondary') : BTN[color] ? img(BTN[color]) : img('btn_grey') && E.tinted('ui_btn_grey', '#3a8ff0'); if (!im) return O.button(g, x, y, w, h, color, down, r);
+    if (round) { const d = Math.min(w, h) * (down ? 0.9 : 1); g.drawImage(im, x + (w - d) / 2, y + (h - d) / 2, d, d); }
+    else E.nine(g, im, x, y + (down ? 4 : 0), w, h - 4, Math.min(im.width / 2 - 1, 46), Math.min((h - 4) / 2, 46));
+  };
+  Rl.pauseIcon = (g, x, y, w, h) => { const b = img('btn_secondary'), s = img('settings'); if (b) g.drawImage(b, x, y, w, h); if (s) g.drawImage(s, x + w * 0.2, y + h * 0.2, w * 0.6, h * 0.6); };
+  // potenciadores en su disco dorado con el dibujo de Pet Rescue
+  const BICON = { hammer: 'booster_round_hammer', column: 'booster_round_rocket', row: 'booster_round_blaster', colorpop: 'booster_round_colourpop' };
+  Rl.boosterIcon = (g, b, x, y, w, h, have) => {
+    const back = img('booster_round_back'), ic = img(BICON[b.id]);
+    if (back) g.drawImage(back, x - 2, y - 2, w + 4, h + 4);
+    if (ic) { const s = Math.min((w * 0.66) / ic.width, (h * 0.66) / ic.height); g.drawImage(ic, x + (w - ic.width * s) / 2, y + (h - ic.height * s) / 2, ic.width * s, ic.height * s); } else E.emoji(g, b.icon, x + w / 2, y + h / 2, w * 0.6);
+    const tx = x + w - 15, ty = y + h - 13;
+    g.beginPath(); g.arc(tx, ty, 16, 0, 7); g.fillStyle = have ? '#e8322b' : '#3cb93c'; g.fill(); g.lineWidth = 3; g.strokeStyle = '#fff'; g.stroke();
+    E.text(g, have === Infinity ? '∞' : have > 0 ? String(have) : '+', tx, ty + 1, 21, '#fff', { stroke: false });
+  };
+  // tiempos medidos en el Pet Rescue real (emulador, 2026-10-22): se iluminan 0,12 s y desaparecen, los de encima caen
+  // a 66 casillas/s² y al llegar se pasan un 10% de casilla y vuelven
+  Rl.timing = { gravity: 66, bounce: 0.1, brighten: 0.12 };
+  // partículas de Pet Rescue (privado/mascotas/fx.js, exportado de effects.xml con tools/king_fx.py)
+  Rl.scripts = (Rl.scripts || []).concat(['fx.js']);
+  Rl.fxEvent = (name, x, y, ts) => E.kfx(name, x, y, ts / 70);
+  // una música para cada modo, como en Pet Rescue
+  Rl.music = { game: () => ({ score: 'music_score', classic: 'music_classic', hybrid: 'music_hybrid' })[GAME.mode] || 'music_rescue', map: 'map_music' };
   Rl.tile = function (t, ts, COLORS) {
     switch (t.kind) {
-      case 'block': return spr('b' + t.color, ts, 1.0);
+      case 'block': return t.rainbow ? spr('rainbow', ts, 1.0) : spr('b' + t.color, ts, 1.0);
+      case 'roto': case 'dblast': return spr(t.kind + ((t.dir || 0) % 4), ts, 1.0);
+      case 'lblast': case 'freezer': return spr(t.kind, ts, 1.0);
+      case 'vflower': return spr('vflower' + ((t.dir || 0) % 4), ts, 1.0);
+      case 'wall': return spr('wall', ts, 1.0);
       case 'cbomb': return spr('cb' + t.color, ts, 0.92);
       case 'paint': return spr('paint' + t.color, ts, 0.95);
       case 'fbox': case 'ibox': return spr(t.kind, ts, 1.0);
       case 'black': return spr('black', ts, 1.0);
       case 'lock': return spr('lock', ts, 0.95);
+      case 'gdiam': case 'gbomb': case 'gkey': return spr(t.kind, ts, 1.0);
     }
     return O.tile(t, ts, COLORS);
   };
+  Rl.images.push('timer', 'vine', 'carrierbox', 'wall'); for (let i = 0; i < 5; i++) Rl.images.push('bfly' + i); for (let d = 0; d < 4; d++) Rl.images.push('vflower' + d);
+  Rl.images.push('gdiam', 'gbomb', 'gkey', 'virus', 'lblast', 'rainbow', 'freezer', 'freezer_lever'); for (let d = 0; d < 4; d++) Rl.images.push('roto' + d, 'dblast' + d); for (let i = 0; i < 5; i++) Rl.images.push('mult' + i);
+  // estrella x2 del color del bloque y bola de pinchos del virus, como en Pet Rescue
+  Rl.blockMarks = (g, t, s) => {
+    if (t.mult) { const im = E.img('mult' + (t.color || 0)); if (im) { const k = s * 0.5; g.drawImage(im, s * 0.5 - k, -s * 0.5, k, k); if (t.mult > 2) E.text(g, 'x' + t.mult, s * 0.25, -s * 0.24, s * 0.16, '#fff', { stroke: '#1d3d7a', sw: 3 }); } }
+    if (t.kind === 'freezer') { // palanca del congelador desde el centro hacia arriba a la derecha, como en el tutorial
+      const im = E.img('freezer_lever'); if (im) { const h = s * 1.15, w = (h * im.width) / im.height; g.save(); g.rotate(0.66); g.drawImage(im, -w / 2, -h * 0.95, w, h); g.restore(); }
+    }
+    if (t.kind === 'vineCover') { const im = E.img('vine'); if (im) g.drawImage(im, -s / 2, -s / 2, s, s); return true; }
+    if (t.bfly) { // mariposa de Pet Rescue batiendo las alas
+      const im = E.img('bfly' + (t.color === 0 ? 3 : 0)); // roja, o amarilla sobre bloque rojo, para que destaque if (im) { const w = s * 0.82, h = (w * im.height) / im.width, k = 0.75 + Math.abs(Math.sin(E.t * 5 + (t.id || 0))) * 0.25; g.save(); g.scale(k, 1); g.drawImage(im, -w / 2, -h / 2, w, h); g.restore(); }
+    }
+    if (t.det != null) { // cronómetro del detonador con las jugadas que le quedan
+      const im = E.img('timer'), r = s * 0.3, cx = -s * 0.2, cy = -s * 0.2; if (im) g.drawImage(im, cx - r, cy - r, r * 2, r * 2);
+      E.text(g, String(t.det), cx, cy + 1, s * 0.32, t.det <= 1 ? '#d62828' : '#1d3d7a', { stroke: false });
+    }
+    if (t.virus) { const im = E.img('virus'); if (im) { const k = s * 0.48; g.drawImage(im, s * 0.5 - k, -s * 0.5, k, k); } }
+    return true;
+  };
+  Rl.carrierBox = (g, s) => { const im = E.img('carrierbox'); if (!im) return false; const h = s * 1.0, w = (h * im.width) / im.height; g.drawImage(im, -w / 2, -h / 2, w, h); return true; };
   Rl.cage = (g, w, h, hp) => fit('cage', 1.0)(g, w, h);
   Rl.wire = (g, w, h, n) => fit(n >= 2 ? 'mesh2' : 'mesh1', 1.02)(g, w, h);
 })();

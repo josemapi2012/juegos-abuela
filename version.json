@@ -1,31 +1,39 @@
 {
- "version": 10,
+ "version": 11,
  "nativo": 2,
- "fecha": "2026-10-22 09:58",
+ "fecha": "2026-10-25 15:32",
  "juegos": {
   "cubos": {
-   "index.html": "e0a7e83552dff869e54efff3325f06386472722884f1ce02edba14a8cf417804",
-   "game.js": "cea0cdeab91fb4ff6dbb886b0d0fd4d20b5a1538836289ff96afce043f969f97",
-   "skins.js": "5d5e15ad163229cb71572f59b1b0f1617b88baa9abe378c9d69088c7c493683b",
-   "engine.js": "1ce8f008d4c639c887b8efdd86495c79aa8ec5eef68b485066d80a8efebb9689"
+   "index.html": "39c98c4602d06334a2b3a1378df1a4aae87036be9118649bcfdb831c570de48a",
+   "game.js": "70f660b75dbfb26e3e763f4f95dc0dbedc00fb13694e8371586742315a5ddf94",
+   "skins.js": "c16b8477fc31a659419f08007acff5497dfcc1384946e42236464dfc36251d15",
+   "engine.js": "7c8e1afc7810f64e21b2cd116bee9712cb1a11dd9e054d0c0cb6fded1fa5e0a7",
+   "gl.js": "08399c6e4d774a81570428cecf2bbe7bceacfd64b4b6b2dd8570f07e4e6f5770",
+   "pixi.min.js": "9ddba9cd78bc8610a1d445ec939393888be83925c78e40d66d9a17e98450228d"
   },
   "dulces": {
-   "index.html": "f8b59f18e1dfb43ba77c91d54d6c6816ee2b71f3870306ba890f118305d105e5",
-   "game.js": "1ce836e50106728b641236de4bb69954d2134f4cfb9cf272491bbd15c90b9c18",
-   "skins.js": "0c3e4273566c0a759bb577dd68c33b4f98822690389e99fe446224adf3ce211a",
-   "engine.js": "1ce8f008d4c639c887b8efdd86495c79aa8ec5eef68b485066d80a8efebb9689"
+   "index.html": "e83d6f58f62ee2f31f7c1bdc8dea653e369624be3849f7965ceb78114b76116b",
+   "game.js": "1a08dcdc964f6791f20afa2d104930b58cffc4159b6653c7d0d046bf8c9c98ac",
+   "skins.js": "dc344557bdd18c1530255c8ed9797d73e93c71a17e22d63544a30172977b3573",
+   "engine.js": "7c8e1afc7810f64e21b2cd116bee9712cb1a11dd9e054d0c0cb6fded1fa5e0a7",
+   "gl.js": "fbb83dd70d5fe54833c2e636552180f905d40f3df333c0e97e42f56c7e1c56fd",
+   "pixi.min.js": "9ddba9cd78bc8610a1d445ec939393888be83925c78e40d66d9a17e98450228d"
   },
   "mascotas": {
-   "index.html": "26f0fe8191ebf3120c10ade2b41670bf4b4f6cbec632a98f3166558d8fb477ee",
-   "game.js": "e607a74f2428829fdcc9285c870b30deeb19247aae1418ab3fef7ae6e8f0c406",
-   "skins.js": "86b0bcbace6d1307262ed0be26c846f5f1680da4e6db621e3bd08fe3580598c1",
-   "engine.js": "1ce8f008d4c639c887b8efdd86495c79aa8ec5eef68b485066d80a8efebb9689"
+   "index.html": "702f1bb49e5031db341ffdd820cdf6ed4eb73c5c902a0f0c0b5da159f15bbc09",
+   "game.js": "0b98ed6ebd66f6909d410a78d9ea9719a679ebde0d4931df2c8938d0bae1df49",
+   "skins.js": "b69fe50b87b9b30fdc09d650dea12c76f54bdd1abf9590623045f788d2789ab1",
+   "engine.js": "7c8e1afc7810f64e21b2cd116bee9712cb1a11dd9e054d0c0cb6fded1fa5e0a7",
+   "gl.js": "ddd60a90dcce62689e2bf023ca89333b938e29497cd2ba193267bbc7f103f61d",
+   "pixi.min.js": "9ddba9cd78bc8610a1d445ec939393888be83925c78e40d66d9a17e98450228d"
   },
   "burbujas": {
-   "index.html": "fac33ff1803deacf809f64ed782a255a9e576e6ef97d8870bff4872448f3d514",
-   "game.js": "4ff6b633a1416d722c359a2c2160b607891d677d960229a87fcf53ffe738e5b7",
-   "skins.js": "82bf0adb71f7d7ea470936ceedce7c186c28fff34d480589fe7b1a4702b79929",
-   "engine.js": "1ce8f008d4c639c887b8efdd86495c79aa8ec5eef68b485066d80a8efebb9689"
+   "index.html": "fc9c153c5050d31a725280a2cb4365551ca57a1d432fa34a3e09368a3cfd6fbf",
+   "game.js": "fb30df183e0a7087170bd30275e79d1137caa9da2983a5aa02e126ea7592aa28",
+   "skins.js": "ea277ddd33f3ce51b817518972c0d6dfa08db6c23edd3c4e3948484f39e63a7a",
+   "engine.js": "7c8e1afc7810f64e21b2cd116bee9712cb1a11dd9e054d0c0cb6fded1fa5e0a7",
+   "gl.js": "700cb475e83c214d7241426f273ea76a5ecc8ab24e0183feeb18d9e1b754a203",
+   "pixi.min.js": "9ddba9cd78bc8610a1d445ec939393888be83925c78e40d66d9a17e98450228d"
   }
  }
 }

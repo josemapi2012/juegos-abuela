@@ -78,6 +78,7 @@ const E = {};
     if (cw < window.innerWidth) document.body.style.background = 'linear-gradient(' + GAME.theme.bg[0] + ',' + GAME.theme.bg[1] + ')';
     E.scale = cv.width / E.W;
     E.H = cv.height / E.scale;
+    if (window.GL && GL.resize) GL.resize(cv, dpr); // dibujo con WebGL (solo los juegos que traen gl.js)
     spriteCache.clear();
     if (E.screen && E.screen.resize) E.screen.resize();
   };
@@ -93,16 +94,38 @@ const E = {};
   E.gfxList = () => ['baja'].concat(Object.keys(GAME.skins || {}).filter((k) => !GFX_OFF.includes(k) && (!GAME.skins[k].images || GAME.skins[k].ready)));
   const imgs = {};
   E.img = (name) => imgs[name];
+  // imagen que se carga la primera vez que se pide (para las muchas decoraciones del mapa)
+  const lazyAsked = new Set();
+  E.imgL = function (name) {
+    if (imgs[name]) return imgs[name];
+    if (!lazyAsked.has(name)) { lazyAsked.add(name); const im = new Image(); im.onload = () => { imgs[name] = im; }; im.src = E.privBase() + name + (/\.\w+$/.test(name) ? '' : '.png'); }
+    return null;
+  };
   function loadSkinImages() {
     const base = location.protocol === 'file:' ? 'file:///android_asset/privado/' : 'privado/';
     for (const [k, sk] of Object.entries(GAME.skins || {})) {
       if (!sk.images) continue;
+      const scripts = (sk.scripts || []).filter((x) => !(sk.loadedScripts || []).includes(x));
+      if (scripts.length) { // primero sus archivos de datos (efectos, mapa…), uno a uno
+        sk.loadedScripts = (sk.loadedScripts || []).concat(scripts[0]);
+        const sc = document.createElement('script');
+        sc.onload = () => {
+          if (window.KFX && !E.kfxData) { E.kfxData = window.KFX; sk.images = sk.images.concat(window.KFX.tex.map((t) => 'fx_' + t)); }
+          if (window.KCUT && !sk.cutAdded) { sk.cutAdded = true; sk.images = sk.images.concat(window.KCUT.tex.map((t) => 'cut_' + t)); }
+          loadSkinImages();
+        };
+        sc.onerror = () => loadSkinImages();
+        sc.src = base + scripts[0]; document.head.appendChild(sc);
+        return;
+      }
+      if (sk.loading) continue;
+      sk.loading = true;
       const names = sk.images; let left = names.length, bad = false;
       for (const n of names) {
         const im = new Image();
         im.onload = () => { imgs[n] = im; if (--left === 0 && !bad) { sk.ready = true; if (E.wantGfx === k) E.setGfx(k); } };
         im.onerror = () => { bad = true; };
-        im.src = base + n + '.png';
+        im.src = base + n + (/\.\w+$/.test(n) ? '' : '.png');
       }
     }
   }
@@ -116,6 +139,9 @@ const E = {};
     GAME.theme = Object.assign({}, baseTheme, (GAME.skins && GAME.skins[v] && GAME.skins[v].theme) || {});
     spriteCache.clear();
     const init = E.skin('init'); if (init) init();
+    if (E.screen) E.music(E.screen === playS ? 'game' : 'map');
+    const skf = GAME.skins && GAME.skins[E.gfx]; if (skf && skf.font) loadSkinFont(skf.font);
+    applySkinFont();
   };
   E.sprite = function (key, w, h, draw) {
     key = E.gfx + ':' + key;
@@ -170,7 +196,29 @@ const E = {};
     else { r *= 1 + amt; gg *= 1 + amt; b *= 1 + amt; }
     return 'rgb(' + (r | 0) + ',' + (gg | 0) + ',' + (b | 0) + ')';
   };
-  E.font = (size, weight) => (weight || '900') + ' ' + Math.round(size) + 'px "Arial Rounded MT Bold","Roboto","Helvetica Neue",Arial,sans-serif';
+  E.fontFamily = null; // la letra del juego original (estilo 'Original'), si está cargada
+  E.font = (size, weight) => (E.fontFamily ? 'normal ' : (weight || '900') + ' ') + Math.round(size) + 'px ' + (E.fontFamily ? '"' + E.fontFamily + '",' : '') + '"Arial Rounded MT Bold","Roboto","Helvetica Neue",Arial,sans-serif';
+  // carga la letra de un estilo (privado/font.otf) y la usa mientras ese estilo esté puesto
+  let fontReady = false;
+  function applySkinFont() {
+    const sk = GAME.skins && GAME.skins[E.gfx];
+    E.fontFamily = sk && sk.font && fontReady ? 'JuegoOriginal' : null;
+    spriteCache.clear();
+  }
+  function loadSkinFont(file) {
+    if (!window.FontFace || fontReady) return;
+    try {
+      const f = new FontFace('JuegoOriginal', 'url(' + E.privBase() + file + ')');
+      f.load().then((ff) => { document.fonts.add(ff); fontReady = true; applySkinFont(); }).catch(() => {});
+    } catch (e) { /* sin letra */ }
+  }
+  // exclamaciones del juego original ("¡Dulce!"): letra en tres capas y su animación
+  const exclaims = [];
+  E.exclaim = function (word, x, y) { const sk = E.skin('exclaim'); if (!sk) return false; exclaims.length = 0; exclaims.push({ word, x, y, t: 0, sk }); return true; }; // nunca dos a la vez
+  E.need2D = () => exclaims.length > 0 || !!E.ovl || !!E.popup2D; // ¿pinta algo el lienzo 2D en este fotograma? (Dulces HD lo esconde si no)
+  function drawExclaims(g, dt) {
+    for (let i = exclaims.length - 1; i >= 0; i--) { const e = exclaims[i]; e.t += dt; if (e.sk(g, e.word, e.x, e.y, e.t)) exclaims.splice(i, 1); }
+  }
   E.text = function (g, str, x, y, size, color, opt) {
     opt = opt || {};
     g.font = E.font(size, opt.weight);
@@ -218,6 +266,33 @@ const E = {};
     g.fillStyle = gr;
     g.fill();
   };
+  // dibuja una imagen estirándola por el centro y respetando las esquinas (como los paneles de los juegos)
+  // b = ancho del borde en la imagen original; d = ancho del borde al dibujarlo
+  E.nine = function (g, im, x, y, w, h, b, d) {
+    if (!im) return;
+    d = d == null ? b : d;
+    const W = im.width, H = im.height, bw = Math.min(b, W / 2), bh = Math.min(b, H / 2), dw = Math.min(d, w / 2), dh = Math.min(d, h / 2);
+    const sx = [0, bw, W - bw, W], sy = [0, bh, H - bh, H], dx = [x, x + dw, x + w - dw, x + w], dy = [y, y + dh, y + h - dh, y + h];
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+      const sw = sx[i + 1] - sx[i], sh = sy[j + 1] - sy[j], ww = dx[i + 1] - dx[i], hh = dy[j + 1] - dy[j];
+      if (sw > 0 && sh > 0 && ww > 0 && hh > 0) g.drawImage(im, sx[i], sy[j], sw, sh, dx[i], dy[j], ww, hh);
+    }
+  };
+  // imagen teñida (multiplicar por un color), guardada para no repetir el trabajo
+  const tintCache = new Map();
+  E.tinted = function (name, rgb) {
+    const im = E.img(name); if (!im) return null;
+    const key = name + ':' + rgb;
+    let c = tintCache.get(key);
+    if (!c) {
+      c = document.createElement('canvas'); c.width = im.width; c.height = im.height;
+      const g = c.getContext('2d'); g.drawImage(im, 0, 0);
+      g.globalCompositeOperation = 'multiply'; g.fillStyle = rgb; g.fillRect(0, 0, c.width, c.height);
+      g.globalCompositeOperation = 'destination-in'; g.drawImage(im, 0, 0);
+      tintCache.set(key, c);
+    }
+    return c;
+  };
   E.star = function (g, x, y, r, fill, stroke) {
     g.beginPath();
     for (let i = 0; i < 10; i++) {
@@ -248,7 +323,8 @@ const E = {};
     if (skb) {
       skb(g, x, y, w, h, color, down, r, opt);
       if (opt.draw) opt.draw(g, x, y + oy, w, h - 6);
-      if (label) E.text(g, label, x + w / 2, y + oy + (h - 6) / 2 + 1, opt.size || h * 0.42, '#fff', { stroke: E.shade(color, -0.5) });
+      const bls = E.skin('btnStroke');
+      if (label) E.text(g, label, x + w / 2, y + oy + (h - 6) / 2 + 1, opt.size || h * 0.42, '#fff', { stroke: bls ? bls(color) : E.shade(color, -0.5) });
       g.restore();
       btns.push({ id, x, y, w, h, cb: opt.cb, sound: opt.sound !== false });
       return;
@@ -314,13 +390,181 @@ const E = {};
         size: (opt.size || 9) * (0.6 + Math.random() * 0.8),
         color: Array.isArray(color) ? color[(Math.random() * color.length) | 0] : color,
         rot: Math.random() * 6, vr: (Math.random() - 0.5) * 10,
-        shape: opt.shape || 'sq', grav: opt.grav != null ? opt.grav : 900,
+        shape: opt.img ? 'img' : opt.shape || 'sq', grav: opt.grav != null ? opt.grav : 900,
+        // opt.img: cada partícula es un trocito (de cuatro posibles) de esa imagen, como los cubos que se rompen en Toy Blast
+        img: opt.img, q: (Math.random() * 4) | 0,
       });
     }
   };
   E.floatText = function (x, y, str, color, size) {
+    // los mensajes grandes no se amontonan: uno nuevo quita al que siga en el mismo sitio
+    if ((size || 34) >= 40) for (let i = parts.length - 1; i >= 0; i--) { const q = parts[i]; if (q.text && q.size >= 40 && Math.abs(q.y - y) < 120 && Math.abs(q.x - x) < 200) parts.splice(i, 1); }
     parts.push({ x, y, vx: 0, vy: -90, life: 0, max: E.save && E.save.big ? 1.6 : 1.1, text: str, color: color || '#fff', size: (size || 34) * (E.save && E.save.big ? 1.15 : 1), grav: 0, rot: 0, vr: 0 });
   };
+  // ---------------------------------------------------------------- efectos de partículas de los juegos originales
+  // Intérprete de los efectos de King (Candy Crush / Pet Rescue): cada evento lanza varias partículas con los
+  // parámetros del juego (cantidad, ángulo, velocidad, fuerza, frenado, tamaño y su cambio, color con el tiempo,
+  // brillo aditivo y tinte del color de la pieza). Los datos vienen de privado/<juego>/fx.js (solo en la tablet).
+  const kparts = [];
+  const fxCmds = []; // con WebGL: lo que hay que dibujar de los efectos en este fotograma (GL.fx lo pinta)
+  const KMAX = 420; // tope para que la tablet vaya fluida (con 260 se perdían los efectos de las jugadas grandes)
+  const rnd = (a) => (a ? a[0] + Math.random() * (a[1] - a[0]) : 0);
+  function kcurve(pts, k) {
+    if (!pts) return 1;
+    if (k <= pts[0][0]) return pts[0][1];
+    for (let i = 1; i < pts.length; i++) if (k <= pts[i][0]) { const [t0, v0] = pts[i - 1], [t1, v1] = pts[i]; return v0 + ((v1 - v0) * (k - t0)) / Math.max(1e-6, t1 - t0); }
+    return pts[pts.length - 1][1];
+  }
+  function kcolor(col, k) {
+    if (!col || !col.length) return [255, 255, 255, 255];
+    if (k <= col[0][0]) return col[0].slice(1);
+    for (let i = 1; i < col.length; i++) if (k <= col[i][0]) { const a = col[i - 1], b = col[i], q = (k - a[0]) / Math.max(1e-6, b[0] - a[0]); return [1, 2, 3, 4].map((j) => a[j] + (b[j] - a[j]) * q); }
+    return col[col.length - 1].slice(1);
+  }
+  // textura teñida (se guarda por color, redondeado para no llenar la memoria)
+  const ktint = new Map();
+  function ktex(name, rgb) {
+    const im = E.img('fx_' + name); if (!im) return null;
+    if (!rgb) return im;
+    // color en 8 niveles por canal: con 16 salían miles de lienzos teñidos y la tablet iba a tirones (medido: 46 → 55 fps sin efectos)
+    const q = rgb.map((v) => (v >> 5) * 32 + 16), key = name + ':' + q.join(',');
+    let c = ktint.get(key);
+    if (!c) {
+      c = document.createElement('canvas'); c.width = im.width; c.height = im.height;
+      const g = c.getContext('2d');
+      g.drawImage(im, 0, 0);
+      g.globalCompositeOperation = 'multiply'; g.fillStyle = 'rgb(' + q.join(',') + ')'; g.fillRect(0, 0, c.width, c.height);
+      g.globalCompositeOperation = 'destination-in'; g.drawImage(im, 0, 0);
+      ktint.set(key, c);
+    }
+    return c;
+  }
+  // lanza el evento 'ev' en (x,y); unit = píxeles por unidad del juego original; tint = [r,g,b] del color de la pieza
+  E.kfx = function (ev, x, y, unit, tint, limit) { // limit: como mucho tantas partículas por emisor (los que emiten sin fin)
+    const D = E.kfxData; if (!D || !D.ev[ev]) return false;
+    let any = false;
+    for (const pn of D.ev[ev]) {
+      const p = D.p[pn]; if (!p || !p.tex) continue;
+      any = true;
+      const n = Math.min(limit || 1e9, p.rate > 0 && p.emit > 0 ? Math.min(p.max, Math.ceil(Math.max(p.emit, 0.05) / p.rate)) : p.max); // emissionRate de King: segundos entre partículas (emit < 0: sin fin, hasta el máximo)
+      for (let i = 0; i < n && kparts.length < KMAX; i++) {
+        const a = ((p.ang || 0) + (Math.random() - 0.5) * (p.spr || 0)) * Math.PI / 180;
+        const r0 = rnd(p.rad) * unit, a0 = Math.random() * Math.PI * 2;
+        const sp = rnd(p.vel) * unit;
+        kparts.push({ p, x: x + Math.cos(a0) * r0 + (Math.random() - 0.5) * (p.area ? p.area[0] : 0) * unit, y: y + Math.sin(a0) * r0 + (Math.random() - 0.5) * (p.area ? p.area[1] : 0) * unit,
+          ox: x, oy: y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, fx: rnd(p.force && p.force[0]) * unit, fy: rnd(p.force && p.force[1]) * unit,
+          cent: rnd(p.cent) * unit, damp: p.damp && rnd(p.damp) > 0 ? rnd(p.damp) : 1, mix: p.col2 ? (p.ext ? (Math.random() < 0.5 ? 0 : 1) : Math.random()) : 0, // amortiguación 0 = ninguna; mix: entre sus dos degradados
+          size: rnd(p.size) * unit, grow: rnd(p.grow) * unit,
+          rot: rnd(p.rot) * Math.PI / 180, rots: rnd(p.rots) * Math.PI / 180, life: Math.max(0.05, rnd(p.ttl) || 0.5), t: -Math.random() * Math.max(0, p.emit || 0),
+          tint: p.tint && tint ? tint : null });
+      }
+    }
+    return any;
+  };
+  // "cutscenes" 2D de los originales (p. ej. el rayado de Candy Crush): imágenes con claves de posición,
+  // escala, color y visibilidad. Datos en privado/<juego>/cut.js (solo en la tablet).
+  const kcuts = [];
+  const tintImgCache = new Map();
+  function tintImg(name, im, r, gg, b) {
+    if (r >= 0.99 && gg >= 0.99 && b >= 0.99) return im;
+    const key = name + ':' + [r, gg, b].map((v) => Math.round(v * 8)).join(',');
+    let c = tintImgCache.get(key);
+    if (!c) {
+      c = document.createElement('canvas'); c.width = im.width; c.height = im.height;
+      const g = c.getContext('2d'); g.drawImage(im, 0, 0);
+      g.globalCompositeOperation = 'multiply'; g.fillStyle = 'rgb(' + [r, gg, b].map((v) => Math.round(Math.min(1, v) * 255)).join(',') + ')'; g.fillRect(0, 0, c.width, c.height);
+      g.globalCompositeOperation = 'destination-in'; g.drawImage(im, 0, 0);
+      tintImgCache.set(key, c);
+    }
+    return c;
+  }
+  const keyAt = (keys, t, n) => {
+    if (!keys.length) return null;
+    if (t <= keys[0][0]) return keys[0].slice(1);
+    for (let i = 1; i < keys.length; i++) if (t <= keys[i][0]) { const a = keys[i - 1], b = keys[i], q = (t - a[0]) / Math.max(1e-6, b[0] - a[0]); return a.slice(1).map((v, j) => v + (b[j + 1] - v) * q); }
+    return keys[keys.length - 1].slice(1);
+  };
+  E.kcut = function (name, x, y, unit) {
+    const D = window.KCUT, c = D && D.c[name]; if (!c) return false;
+    kcuts.push({ c, x, y, unit, t: 0 }); return true;
+  };
+  function drawKCuts(g, dt) {
+    for (let i = kcuts.length - 1; i >= 0; i--) {
+      const k = kcuts[i]; k.t += dt;
+      if (k.t > k.c.dur) { kcuts.splice(i, 1); continue; }
+      for (const o of k.c.objs) {
+        const t = k.t - (o.t0 || 0); if (t < 0) continue;
+        let vis = 1; for (const v of o.vis) if (t >= v[0]) vis = v[1];
+        if (!vis) continue;
+        const im = E.img('cut_' + o.tex); if (!im) continue;
+        const tr = keyAt(o.tr, t) || [0, 0], sc = keyAt(o.sc, t) || [1, 1], col = keyAt(o.col, t) || [1, 1, 1, 1], rot = keyAt(o.rot, t);
+        if (col[3] <= 0.01) continue;
+        if (!g) { fxCmds.push({ im, x: k.x + tr[0] * k.unit, y: k.y + tr[1] * k.unit, w: im.width * sc[0] * k.unit, h: im.height * sc[1] * k.unit, rot: rot ? (rot[0] * Math.PI) / 180 : 0, alpha: Math.min(1, col[3]), tint: [col[0], col[1], col[2]].map((v) => Math.round(Math.min(1, v) * 255)) }); continue; }
+        g.save(); g.globalAlpha = Math.min(1, col[3]);
+        g.translate(k.x + tr[0] * k.unit, k.y + tr[1] * k.unit); if (rot) g.rotate((rot[0] * Math.PI) / 180);
+        const w = im.width * sc[0] * k.unit, h = im.height * sc[1] * k.unit;
+        g.drawImage(tintImg(o.tex, im, col[0], col[1], col[2]), -w / 2, -h / 2, w, h);
+        g.restore();
+      }
+    }
+  }
+  function drawKParts(g, dt) {
+    for (let i = kparts.length - 1; i >= 0; i--) {
+      const q = kparts[i], p = q.p;
+      q.t += dt;
+      if (q.t < 0) continue;
+      const k = q.t / q.life;
+      if (k >= 1) { kparts.splice(i, 1); continue; }
+      q.vx += q.fx * dt; q.vy += q.fy * dt;
+      if (q.cent) { const dx = q.x - q.ox, dy = q.y - q.oy, d = Math.hypot(dx, dy) || 1; q.vx += (dx / d) * q.cent * dt; q.vy += (dy / d) * q.cent * dt; }
+      if (q.damp !== 1) { const f = Math.pow(q.damp, dt * 60); q.vx *= f; q.vy *= f; }
+      const vm = kcurve(p.velc, k);
+      q.x += q.vx * vm * dt; q.y += q.vy * vm * dt;
+      q.size = Math.max(0, q.size + q.grow * kcurve(p.growc, k) * dt);
+      q.rot += q.rots * dt;
+      let c = kcolor(p.col, k);
+      if (q.mix && p.col2) { const c2 = kcolor(p.col2, k); c = c.map((v, j) => v + (c2[j] - v) * q.mix); }
+      // paquete de texturas de Candy Crush (vfx_texturepack[_alpha].ffsb): la transparencia elige el canal (hasta 0,33 el verde,
+      // hasta 0,66 el rojo, luego el azul) y lo fuerte que sale; el color tiñe la máscara de ese canal
+      let tpTex = null;
+      if (p.tp) {
+        const a = Math.max(0, Math.min(1, c[3] / 255)), ch = a <= 0.33 ? 'g' : a <= 0.66 ? 'r' : 'b';
+        const str = p.tp === 'a' ? Math.min(1, ch === 'g' ? a * 3.1 : ch === 'r' ? (a - 0.33) * 3 : (a - 0.66) * 3.1) : 1;
+        tpTex = p.tex + '_' + p.tp + ch; c = [Math.min(255, c[0] * 1.3), Math.min(255, c[1] * 1.3), Math.min(255, c[2] * 1.3), str * 255];
+      }
+      const rgb = q.tint ? [Math.round(c[0] * q.tint[0] / 255), Math.round(c[1] * q.tint[1] / 255), Math.round(c[2] * q.tint[2] / 255)] : (c[0] < 250 || c[1] < 250 || c[2] < 250 ? [c[0] | 0, c[1] | 0, c[2] | 0] : null);
+      if (!g) { // WebGL: la imagen sin teñir; el color va como tinte del dibujo
+        const im0 = E.img('fx_' + (tpTex || p.tex)); if (!im0 || q.size < 0.5) continue;
+        const fx = p.fx || 1, fy = p.fy || 1, cmd = { im: im0, x: q.x, y: q.y, w: q.size, h: q.size, rot: q.rot, alpha: Math.max(0, Math.min(1, c[3] / 255)), tint: rgb, blend: p.add ? 'add' : p.mul ? 'mul' : null, r: q.rnd || (q.rnd = Math.random()) };
+        if (fx * fy > 1) { const fr = p.frames || [fx * fy, 0, 30], idx = (fr[1] + (Math.floor(q.t * fr[2]) % Math.max(1, fr[0]))) % (fx * fy); cmd.fr = [fx, fy, idx]; }
+        fxCmds.push(cmd); continue;
+      }
+      const im = ktex(tpTex || p.tex, rgb); if (!im || q.size < 0.5) continue;
+      g.save();
+      g.globalAlpha = Math.max(0, Math.min(1, c[3] / 255));
+      if (p.add) g.globalCompositeOperation = 'lighter';
+      else if (p.mul) g.globalCompositeOperation = 'multiply'; // mezcla "Multiply" de King (el explotacolores de Pet Rescue)
+      g.translate(q.x, q.y); if (q.rot) g.rotate(q.rot);
+      const fx = p.fx || 1, fy = p.fy || 1;
+      if (fx * fy > 1) {
+        const fr = p.frames || [fx * fy, 0, 30], idx = (fr[1] + (Math.floor(q.t * fr[2]) % Math.max(1, fr[0]))) % (fx * fy);
+        const fw = im.width / fx, fh = im.height / fy;
+        g.drawImage(im, (idx % fx) * fw, Math.floor(idx / fx) * fh, fw, fh, -q.size / 2, -q.size / 2, q.size, q.size);
+      } else g.drawImage(im, -q.size / 2, -q.size / 2, q.size, q.size);
+      g.restore();
+    }
+  }
+  const textCache = new Map();
+  function textImg(str, size, color) {
+    const key = str + '|' + size + '|' + color; let c = textCache.get(key);
+    if (c) return c;
+    if (document.fonts && !document.fonts.check(E.font(size))) return null;
+    c = document.createElement('canvas'); const g0 = c.getContext('2d'); g0.font = E.font(size);
+    c.width = Math.ceil(g0.measureText(str).width + size * 0.6); c.height = Math.ceil(size * 1.6);
+    E.text(c.getContext('2d'), str, c.width / 2, c.height / 2, size, color);
+    if (textCache.size > 80) textCache.clear();
+    textCache.set(key, c); return c;
+  }
   function drawParts(g, dt) {
     for (let i = parts.length - 1; i >= 0; i--) {
       const p = parts[i];
@@ -329,22 +573,31 @@ const E = {};
       p.vy += p.grav * dt;
       p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt;
       const k = 1 - p.life / p.max;
+      if (!g) { // WebGL: el texto o la forma con su color
+        const al = Math.min(1, k * 1.6), sz = p.size * (0.4 + 0.6 * k);
+        fxCmds.push(p.text ? { text: p.text, size: p.size, color: p.color, x: p.x, y: p.y, alpha: al } : { shape: p.shape, color: p.color, x: p.x, y: p.y, s: sz, rot: p.rot, alpha: al, img: p.img, q: p.q });
+        continue;
+      }
       g.save();
       g.globalAlpha = Math.min(1, k * 1.6);
-      if (p.text) {
-        E.text(g, p.text, p.x, p.y, p.size, p.color);
+      if (p.text) { // el texto flotante se dibuja una vez en una imagen y luego solo se mueve (más fluido en la tablet)
+        const im = textImg(p.text, p.size, p.color);
+        if (im) g.drawImage(im, p.x - im.width / 2, p.y - im.height / 2); else E.text(g, p.text, p.x, p.y, p.size, p.color);
       } else {
         g.translate(p.x, p.y); g.rotate(p.rot);
         g.fillStyle = p.color;
         const s = p.size * (0.4 + 0.6 * k);
         if (p.shape === 'star') E.star(g, 0, 0, s, p.color);
         else if (p.shape === 'circle') { g.beginPath(); g.arc(0, 0, s / 2, 0, 7); g.fill(); }
+        else if (p.shape === 'img' && p.img) { const iw = p.img.width, ih = p.img.height, w3 = iw * 0.34, h3 = ih * 0.34; g.drawImage(p.img, iw * (0.15 + (p.q % 2) * 0.36), ih * (0.15 + ((p.q / 2) | 0) * 0.36), w3, h3, -s / 2, -s / 2, s, s); } // un trocito de dentro, sin el canto: no parece un bloque entero
         else g.fillRect(-s / 2, -s / 2, s, s * 0.7);
       }
       g.restore();
     }
   }
   E.confetti = function () {
+    // con WebGL (Rescate Animal HD) el confeti de partículas del juego original, en tres explosiones arriba
+    if (window.GL && E.kfxData && E.kfxData.ev.Confetti) { [[0.25, 0.28, 0], [0.75, 0.28, 0.15], [0.5, 0.18, 0.3]].forEach(([fx, fy, d]) => E.after(d, () => E.kfx('Confetti', E.W * fx, E.H * fy, E.W / 700))); return; }
     const cols = ['#ff4d4d', '#ffd23f', '#3fa7ff', '#4cd964', '#c86bff', '#ff9f1c'];
     for (let i = 0; i < 90; i++) {
       parts.push({
@@ -359,6 +612,7 @@ const E = {};
 
   // ---------------------------------------------------------------- sonido (sintetizado, sin archivos)
   let ac = null, master = null, noiseBuf = null;
+  let sfxBus = null;
   function ensureAudio() {
     if (!ac) {
       try {
@@ -366,12 +620,16 @@ const E = {};
         master = ac.createGain();
         master.gain.value = 0.6;
         master.connect(ac.destination);
+        // los sonidos grabados pasan por un compresor suave: varios a la vez no saturan
+        sfxBus = ac.createDynamicsCompressor(); sfxBus.threshold.value = -18; sfxBus.knee.value = 12; sfxBus.ratio.value = 4; sfxBus.attack.value = 0.003; sfxBus.release.value = 0.15;
+        sfxBus.connect(ac.destination);
         noiseBuf = ac.createBuffer(1, ac.sampleRate * 0.6, ac.sampleRate);
         const d = noiseBuf.getChannelData(0);
         for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
       } catch (e) { ac = null; }
     }
     if (ac && ac.state === 'suspended') ac.resume();
+    return ac;
   }
   function tone(type, f1, f2, dur, vol, delay) {
     const t0 = ac.currentTime + (delay || 0);
@@ -399,10 +657,79 @@ const E = {};
   }
   // sonido en tres niveles: 2 alto, 1 bajo, 0 sin sonido
   E.vol = () => (E.save.vol != null ? E.save.vol : E.save.sound ? 2 : 0);
-  E.cycleSound = function () { E.save.vol = (E.vol() + 2) % 3; E.save.sound = E.save.vol > 0; E.persist(); if (master) master.gain.value = [0, 0.22, 0.6][E.save.vol]; E.sfx('click'); };
+  E.cycleSound = function () { E.save.vol = (E.vol() + 2) % 3; E.save.sound = E.save.vol > 0; E.persist(); if (master) master.gain.value = [0, 0.22, 0.6][E.save.vol]; E.sfx('click'); E.music(E.screen === playS ? 'game' : 'map'); };
   E.soundIcon = () => ['🔇', '🔉', '🔊'][E.vol()];
+  // sonidos y música originales (estilo 'Original'): archivos en privado/<juego>/snd/, solo en la tablet
+  const sndPool = {};
+  E.privBase = () => (location.protocol === 'file:' ? 'file:///android_asset/privado/' : 'privado/');
+  // cada sonido tiene 3 reproductores ya cargados: crear o clonar un Audio en plena partida hacía dar tirones a la tablet
+  const sndLoad = (n) => {
+    if (!sndPool[n]) sndPool[n] = [0, 1, 2].map(() => { const a = new Audio(E.privBase() + 'snd/' + n + '.ogg'); a.preload = 'auto'; try { a.load(); } catch (e) {} return a; });
+    return sndPool[n];
+  };
+  // con Web Audio (si la app deja leer sus archivos): cada sonido se descodifica una vez y suena al instante, sin tirones
+  const bufs = {}, bufAsked = {};
+  const bufLoad = (n) => {
+    if (bufAsked[n] || !ensureAudio()) return; bufAsked[n] = true;
+    try {
+      const x = new XMLHttpRequest(); x.open('GET', E.privBase() + 'snd/' + n + '.ogg'); x.responseType = 'arraybuffer';
+      x.onload = () => { if (!x.response || !x.response.byteLength) return; ac.decodeAudioData(x.response, (b) => { bufs[n] = b; }, () => {}); };
+      x.send();
+    } catch (e) { /* se queda con Audio() */ }
+  };
+  E.sndInfo = () => ({ webaudio: Object.keys(bufs).length, pedidos: Object.keys(bufAsked).length, estado: ac && ac.state }); // para comprobar en la tablet
+  E.playFile = function (n, vol) {
+    try {
+      if (ac && bufs[n]) {
+        if (ac.state === 'suspended') ac.resume();
+        const src = ac.createBufferSource(), gn = ac.createGain(); src.buffer = bufs[n]; gn.gain.value = Math.max(0, Math.min(1, vol));
+        src.connect(gn); gn.connect(sfxBus || ac.destination); src.start(); return;
+      }
+      bufLoad(n);
+      const pool = sndLoad(n);
+      const c = pool.find((a) => a.paused || a.ended) || pool.reduce((x, y) => (x.currentTime > y.currentTime ? x : y)); // si suenan los 3, el más avanzado
+      c.volume = Math.max(0, Math.min(1, vol)); c.currentTime = 0;
+      const pr = c.play(); if (pr && pr.catch) pr.catch(() => {});
+    } catch (e) { /* sin sonido */ }
+  };
+  // precarga los sonidos del estilo (también las voces), para que no se carguen al sonar por primera vez
+  E.preloadSfx = function () {
+    const sm = E.skin('sfx'); if (!sm || !E.vol()) return;
+    for (const v of Object.values(sm)) {
+      if (!v) continue;
+      const lists = typeof v === 'function' ? [0.5, 1, 1.2, 1.5, 2, 3].map((p) => { try { return v(p); } catch (e) { return []; } }) : [v];
+      for (const l of lists) for (const n of Array.isArray(l) ? l : [l]) if (n) { bufLoad(n); sndLoad(n); }
+    }
+  };
+  let musicEl = null, musicName = null;
+  E.music = function (which) {
+    const sk = E.skin('music'), v = sk && sk[which], n = typeof v === 'function' ? v() : v; // el nombre puede depender del nivel
+    if (!n || !E.vol() || E.fast) { if (musicEl) { musicEl.pause(); musicName = null; } return; }
+    if (musicName === n && musicEl && !musicEl.paused) { musicEl.volume = [0, 0.12, 0.3][E.vol()]; return; }
+    if (musicEl) musicEl.pause();
+    musicEl = new Audio(E.privBase() + 'snd/' + n + '.ogg'); musicEl.loop = true; musicEl.volume = [0, 0.12, 0.3][E.vol()]; musicName = n;
+    const pr = musicEl.play(); if (pr && pr.catch) pr.catch(() => {});
+  };
+  E.musicPause = function (on) { if (musicEl) { if (on) musicEl.pause(); else if (musicName && E.vol()) { const pr = musicEl.play(); if (pr && pr.catch) pr.catch(() => {}); } } };
+  // voces grabadas del narrador del juego original ("Sweet!", "Sugar Crush!"...): se pueden quitar en Ajustes
+  E.isNarrator = (name) => /^vo\d$|^sugarcrush$/.test(name);
+  const sfxLast = {};
   E.sfx = function (name, p) {
-    if (!E.vol() || !ac || E.fast) return;
+    if (!E.vol() || E.fast) return;
+    if (E.save.noNarr && E.isNarrator(name)) return;
+    const sm = E.skin('sfx');
+    if (sm && sm[name] !== undefined) { // sonido del juego original (si un nombre vale null, se calla)
+      const v = sm[name]; if (!v) return;
+      const list = typeof v === 'function' ? v(p || 1) : v;
+      const n = Array.isArray(list) ? list[(Math.random() * list.length) | 0] : list;
+      if (!n) return;
+      // el mismo sonido muchas veces seguidas (p. ej. cada bloque al caer) se oye duro: uno cada 50 ms como mucho
+      const now = performance.now(); if (now - (sfxLast[n] || 0) < 50) return; sfxLast[n] = now;
+      const db = (E.skin('sfxVol') || {})[n] || 0; // volumen del sonido en el juego original (dB)
+      E.playFile(n, [0, 0.35, 0.9][E.vol()] * Math.pow(10, db / 20));
+      return;
+    }
+    if (!ac) return;
     master.gain.value = [0, 0.22, 0.6][E.vol()];
     p = p || 1;
     try {
@@ -458,25 +785,46 @@ const E = {};
 
   // ---------------------------------------------------------------- ventanas emergentes
   E.popup = null;
+  // animaciones por claves de los juegos originales (privado/<juego>/anim.js): escala, posición y giro en el tiempo
+  E.kanim = function (name, t, fromVisible) {
+    const A = window.KANIM && window.KANIM[name]; if (!A) return null;
+    let f = t * A.speed;
+    if (fromVisible && A.sc.length) { // empezar donde la escala deja de ser 0
+      let i0 = 0; while (i0 < A.sc.length - 1 && A.sc[i0 + 1][1] === 0 && A.sc[i0 + 1][2] === 0) i0++;
+      f += A.sc[i0][0];
+    } else if (A.sc.length) f += A.sc[0][0];
+    const end = Math.max(A.sc.length ? A.sc[A.sc.length - 1][0] : 0, A.tr.length ? A.tr[A.tr.length - 1][0] : 0);
+    const at = (keys, d) => { if (!keys.length) return d; if (f <= keys[0][0]) return keys[0].slice(1); for (let i = 1; i < keys.length; i++) if (f <= keys[i][0]) { const a = keys[i - 1], b = keys[i], q = (f - a[0]) / Math.max(1e-6, b[0] - a[0]); return a.slice(1).map((v, j) => v + (b[j + 1] - v) * q); } return keys[keys.length - 1].slice(1); };
+    const sc = at(A.sc, [1, 1]), tr = at(A.tr, [0, 0]), rot = at(A.rot, [0]);
+    return { sx: sc[0], sy: sc[1], tx: tr[0], ty: tr[1], rot: rot[0], done: f >= end };
+  };
   E.openPopup = function (p) {
-    p.anim = 0;
+    E.sfx('popIn'); // sonido de ventana del juego original (los demás estilos no tienen)
+    p.anim = 0; p.t0 = E.t;
     E.popup = p;
     E.tween(p, { anim: 1 }, 0.35, { ease: E.ease.outBack });
   };
   E.closePopup = function (cb) {
     const p = E.popup;
     if (!p) { if (cb) cb(); return; }
-    p.closing = true;
-    E.tween(p, { anim: 0 }, 0.18, { ease: E.ease.inQuad, done: () => { if (E.popup === p) E.popup = null; if (cb) cb(); } });
+    if (!p.closing) E.sfx('popOut');
+    p.closing = true; p.tc = E.t;
+    E.tween(p, { anim: 0 }, p.closeDur || (E.skin('popupKanim') && window.KANIM ? 0.42 : 0.18), { ease: E.ease.inQuad, done: () => { if (E.popup === p) E.popup = null; if (cb) cb(); } });
   };
   function drawPopup(g) {
     const p = E.popup;
+    E.popup2D = true; // si WebGL la dibuja, vuelve a false abajo
+    if (window.GL && GL.popup && (p.win || p.pre || p.lost || p.gl) && GL.popup(p, g)) { E.popup2D = false; return; } // la dibuja WebGL entera (fondo, animación y botones)
     g.save();
     g.fillStyle = 'rgba(0,0,0,' + (0.5 * Math.min(1, p.anim)) + ')';
     g.fillRect(0, 0, E.W, E.H);
-    const s = Math.max(0.01, p.anim);
+    let sx = Math.max(0.01, p.anim), sy = sx;
+    if (E.skin('popupKanim') && window.KANIM) { // ventana que crece y rebota como en el juego original
+      const a = p.closing ? E.kanim('OnDisappearShrink', E.t - p.tc, false) : E.kanim('OnAppearGrow', E.t - (p.t0 || 0), true);
+      if (a) { sx = Math.max(0.01, a.sx); sy = Math.max(0.01, a.sy); }
+    }
     g.translate(E.W / 2, E.H / 2);
-    g.scale(s, s);
+    g.scale(sx, sy);
     g.translate(-E.W / 2, -E.H / 2);
     p.draw(g);
     g.restore();
@@ -561,8 +909,19 @@ const E = {};
     if (mapS.scroll > maxS) mapS.scroll = E.lerp(mapS.scroll, maxS, 0.2);
   };
   mapS.draw = function (g) {
+    if (window.GL && GL.home) { // pantalla principal del juego original dibujada con WebGL (Rescate Animal HD)
+      const MS0 = missionState();
+      if (GL.home({ level: E.save.level, chest: Math.min(CHEST, E.save.chest || 0), CHEST, streak: E.save.streak || 0, fiesta: E.fiesta(), weekly: E.weekly(),
+        missions: missionList().filter((m) => !MS0.done.includes(m.id)).length, play: () => openPreLevel(E.save.level), album: () => E.openAlbum(), settings: () => E.openSettings(),
+        openMissions: () => E.openMissions(), openWeekly: () => E.openWeekly(), openFiesta: () => E.openFiesta() })) return;
+    }
     const th = GAME.theme;
     const off = mapS.scroll + E.H;
+    // los HD dibujan con WebGL el mapa entero (fondo, camino, carteles y niveles); los toques siguen siendo los de aquí
+    const bodyGL = !!(window.GL && GL.mapBody && GL.mapBody({ scroll: mapS.scroll, off, gap: NODE_GAP, world: WORLD, level: E.save.level,
+      first: Math.max(1, Math.max(0, Math.floor((mapS.scroll - E.H * 0.2) / NODE_GAP) - 2)), last: Math.floor((mapS.scroll + E.H * 1.2) / NODE_GAP) + 2,
+      pos: (i) => { const p = nodePos(i); return { x: p.x, y: p.y + off }; }, stars: (i) => E.save.stars[i] || 1, hard: (i) => E.hardness(i), worldName: (w) => E.worldName(w), mascot: th.mascot }));
+    if (!bodyGL) {
     mapBg(g, mapS.scroll);
     // decoraciones
     const first = Math.max(0, Math.floor((mapS.scroll - E.H * 0.2) / NODE_GAP) - 2);
@@ -634,6 +993,15 @@ const E = {};
         for (let s = 0; s < 3; s++) E.star(g, x + (s - 1) * 22, y + r + 4 - (s === 1 ? 6 : 0), 11, s < st ? '#ffd23f' : '#d0d0d0', '#a86b00');
       }
       if (cur) E.emoji(g, th.mascot, x - r - 26, y - 6, 54);
+    }
+    }
+    // Dulces HD: la barra de arriba y la de navegación de Candy Crush, con WebGL encima del mapa (sin botón "Jugar":
+    // como en el original, el nivel se abre tocando su círculo)
+    if (window.GL && GL.mapChrome) {
+      const MS1 = missionState();
+      if (GL.mapChrome({ level: E.save.level, chest: Math.min(CHEST, E.save.chest || 0), CHEST, streak: E.save.streak || 0, fiesta: E.fiesta(), weekly: E.weekly(),
+        missions: missionList().filter((m) => !MS1.done.includes(m.id)).length, play: () => openPreLevel(E.save.level), album: () => E.openAlbum(), settings: () => E.openSettings(),
+        openMissions: () => E.openMissions(), openWeekly: () => E.openWeekly(), openFiesta: () => E.openFiesta() })) return;
     }
     // cabecera
     const skh = E.skin('mapHeader');
@@ -710,6 +1078,7 @@ const E = {};
     E.say(title + '. ' + sub);
     E.confetti();
     E.openPopup({
+      gl: { kind: 'reward', title, sub, icons: icons || [], ok: () => E.closePopup(then) }, // datos para el dibujo WebGL
       draw(g) {
         const w = 520, h = 520, x = (E.W - w) / 2, y = (E.H - h) / 2;
         E.panel(g, x, y, w, h, GAME.theme.panel);
@@ -748,6 +1117,7 @@ const E = {};
   E.openAlbum = function () {
     const L = achList();
     E.openPopup({
+      gl: { kind: 'album', items: () => L.map((a) => ({ id: a.id, name: a.name, value: a.value, tiers: a.tiers, t: E.save.ach[a.id] || 0 })), close: () => E.closePopup() },
       draw(g) {
         const w = 560, h = 210 + L.length * 112, x = (E.W - w) / 2, y = (E.H - h) / 2;
         E.panel(g, x, y, w, h, GAME.theme.panel);
@@ -775,43 +1145,76 @@ const E = {};
     if (!SB.length || E.save.gift === E.today()) { if (then) then(); return; }
     const ids = SB.map((b) => b.id), bi = (GAME.boosters || []).map((b) => 'b:' + b.id);
     const bk = (i) => bi[i % bi.length];
-    const segs = [[ids[0]], [bk(0)], [ids[1]], [bk(1), bk(2)], [ids[2]], [ids[0], bk(bi.length - 1), ids[1]]];
-    const cols = ['#ff7a7a', '#ffd23f', '#7ad7ff', '#9be37b', '#d59bff', '#ffb366'];
+    // el estilo puede dar su ruleta: imagen del juego original ({ face, arrow, n }) o sus colores ({ colors, rim, hub })
+    const WS = E.skin('wheel'), base = [[ids[0]], [bk(0)], [ids[1]], [bk(1), bk(2)], [ids[2]], [ids[0], bk(bi.length - 1), ids[1]]];
+    const segs = Array.from({ length: (WS && WS.n) || base.length }, (_, i) => base[i % base.length]);
+    const cols = (WS && WS.colors) || ['#ff7a7a', '#ffd23f', '#7ad7ff', '#9be37b', '#d59bff', '#ffb366'];
     const st = { rot: 0, spinning: false, done: false, prize: null };
     const finish = () => E.closePopup(then);
+    const spin = () => {
+      if (st.spinning) return;
+      st.spinning = true;
+      const k = (Math.random() * segs.length) | 0;
+      // la casilla k termina arriba, bajo la flecha
+      const target = Math.PI * 2 * 5 - ((k + 0.5) / segs.length) * Math.PI * 2;
+      E.sfx('magic');
+      let seg = 0; const tick = () => { if (st.done) return; const k2 = Math.floor((st.rot / (Math.PI * 2)) * segs.length); if (k2 !== seg) { seg = k2; E.sfx('wheelTick'); } E.after(0.03, tick); }; tick();
+      E.tween(st, { rot: target }, 3.2, { ease: (t) => 1 - Math.pow(1 - t, 3), done: () => {
+        st.done = true; st.prize = segs[k];
+        for (const id of segs[k]) giveItem(id);
+        E.save.gift = E.today(); E.persist();
+        E.sfx(E.skin('sfx') && E.skin('sfx').wheelWin ? 'wheelWin' : 'win'); E.confetti(); E.say('¡Te ha tocado un regalo!');
+      } });
+    };
+    // con WebGL (Rescate Animal HD) es el "Regalo diario" de Pet Rescue: 7 regalos por días seguidos jugados, el 7.º el bonus
+    const DAYS = [base[0], base[1], base[2], base[3], base[4], base[5], ids.slice(0, 3)];
+    let day = 1; { const d = new Date(); for (;;) { d.setDate(d.getDate() - 1); const k = d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); if (!E.save.stats.days[k] || day > 400) break; day++; } }
+    day = ((day - 1) % 7) + 1;
+    const claim = () => {
+      if (st.done) return;
+      st.done = true; st.prize = DAYS[day - 1];
+      for (const id of st.prize) giveItem(id);
+      E.save.gift = E.today(); E.persist();
+      E.sfx(E.skin('sfx') && E.skin('sfx').wheelWin ? 'wheelWin' : 'win'); E.confetti(); E.say('¡Te ha tocado un regalo!');
+    };
     E.openPopup({
+      gl: { kind: 'daily', day, prizes: DAYS.map((L) => L.map((id) => startDef(id).icon)), st, claim, finish,
+        wheel: { segs: segs.map((L) => L.map((id) => startDef(id).icon)), cols, WS, spin } }, // la ruleta, para los HD que la dibujan con WebGL
       draw(g) {
         const w = 540, h = 700, x = (E.W - w) / 2, y = (E.H - h) / 2, cx = E.W / 2, cy = y + 330, R = 200;
         E.panel(g, x, y, w, h, GAME.theme.panel);
-        E.text(g, '🎁 Regalo del día', cx, y + 55, 40, GAME.theme.accent, { stroke: '#fff', sw: 8 });
-        for (let i = 0; i < segs.length; i++) {
-          const a0 = st.rot + (i / segs.length) * Math.PI * 2 - Math.PI / 2, a1 = a0 + (Math.PI * 2) / segs.length;
-          g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy, R, a0, a1); g.closePath(); g.fillStyle = cols[i]; g.fill(); g.lineWidth = 4; g.strokeStyle = '#fff'; g.stroke();
-          const am = (a0 + a1) / 2;
-          segs[i].forEach((id, j) => { const d = R * (0.45 + j * 0.2); E.emoji(g, startDef(id).icon, cx + Math.cos(am) * d, cy + Math.sin(am) * d, 40); });
+        E.text(g, 'Regalo del día', cx, y + 55, 40, GAME.theme.accent, { stroke: '#fff', sw: 8 });
+        const face = WS && WS.face && E.img(WS.face), arrow = WS && WS.arrow && E.img(WS.arrow);
+        if (face) { // la rueda dibujada del juego original, girando
+          const d = R * 2.16; g.save(); g.translate(cx, cy); g.rotate(st.rot); g.drawImage(face, -d / 2, -d / 2, d, d); g.restore();
+        } else if (WS && WS.rim) { // aro con bombillas, gajos con brillo y buje en los colores del juego
+          g.beginPath(); g.arc(cx, cy, R + 22, 0, 7); g.fillStyle = WS.rim; g.fill();
+          g.beginPath(); g.arc(cx, cy, R + 22, 0, 7); g.lineWidth = 4; g.strokeStyle = 'rgba(0,0,0,0.25)'; g.stroke();
+          for (let i = 0; i < segs.length; i++) {
+            const a0 = st.rot + (i / segs.length) * Math.PI * 2 - Math.PI / 2, a1 = a0 + (Math.PI * 2) / segs.length, c0 = cols[i % cols.length];
+            const gr = g.createRadialGradient(cx, cy, R * 0.15, cx, cy, R); gr.addColorStop(0, E.shade(c0, 0.35)); gr.addColorStop(0.75, c0); gr.addColorStop(1, E.shade(c0, -0.2));
+            g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy, R, a0, a1); g.closePath(); g.fillStyle = gr; g.fill(); g.lineWidth = 3; g.strokeStyle = 'rgba(255,255,255,0.85)'; g.stroke();
+          }
+          const on = Math.floor(E.t * 4) % 2;
+          for (let i = 0; i < 16; i++) { const a = (i / 16) * Math.PI * 2; g.beginPath(); g.arc(cx + Math.cos(a) * (R + 11), cy + Math.sin(a) * (R + 11), 6, 0, 7); g.fillStyle = (i + on) % 2 ? '#fff6c0' : '#ffd23f'; g.fill(); }
+        } else {
+          for (let i = 0; i < segs.length; i++) {
+            const a0 = st.rot + (i / segs.length) * Math.PI * 2 - Math.PI / 2, a1 = a0 + (Math.PI * 2) / segs.length;
+            g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy, R, a0, a1); g.closePath(); g.fillStyle = cols[i % cols.length]; g.fill(); g.lineWidth = 4; g.strokeStyle = '#fff'; g.stroke();
+          }
         }
-        g.beginPath(); g.arc(cx, cy, 30, 0, 7); g.fillStyle = '#fff'; g.fill();
-        g.beginPath(); g.moveTo(cx - 22, cy - R - 26); g.lineTo(cx + 22, cy - R - 26); g.lineTo(cx, cy - R + 14); g.closePath(); g.fillStyle = '#e8453c'; g.fill();
+        for (let i = 0; i < segs.length; i++) { // premios de cada casilla
+          const am = st.rot + ((i + 0.5) / segs.length) * Math.PI * 2 - Math.PI / 2, many = segs[i].length > 1;
+          segs[i].forEach((id, j) => { const d = R * (many ? 0.42 + j * 0.2 : 0.62); E.emoji(g, startDef(id).icon, cx + Math.cos(am) * d, cy + Math.sin(am) * d, many ? 38 : 50); });
+        }
+        if (!face) { g.beginPath(); g.arc(cx, cy, 30, 0, 7); g.fillStyle = (WS && WS.hub) || '#fff'; g.fill(); if (WS && WS.rim) { g.lineWidth = 5; g.strokeStyle = WS.rim; g.stroke(); } }
+        if (arrow) { const ah = 96, aw = (ah * arrow.width) / arrow.height; g.drawImage(arrow, cx - aw / 2, cy - R - 46, aw, ah); }
+        else { g.beginPath(); g.moveTo(cx - 22, cy - R - 26); g.lineTo(cx + 22, cy - R - 26); g.lineTo(cx, cy - R + 14); g.closePath(); g.fillStyle = (WS && WS.arrowColor) || '#e8453c'; g.fill(); if (WS) { g.lineWidth = 3; g.strokeStyle = '#fff'; g.stroke(); } }
         if (st.done) {
           E.text(g, '¡Te ha tocado!', cx, y + h - 170, 34, '#d2481f', { stroke: '#fff', sw: 6 });
           E.button('wh_ok', x + 120, y + h - 120, w - 240, 90, '¡Estupendo!', { color: '#3cb93c', size: 36, cb: finish });
         } else if (!st.spinning) {
-          E.button('wh_go', x + 120, y + h - 120, w - 240, 90, '¡Girar!', {
-            color: '#ff8a1f', size: 40,
-            cb: () => {
-              st.spinning = true;
-              const k = (Math.random() * segs.length) | 0;
-              // la casilla k termina arriba, bajo la flecha
-              const target = Math.PI * 2 * 5 - ((k + 0.5) / segs.length) * Math.PI * 2;
-              E.sfx('magic');
-              E.tween(st, { rot: target }, 3.2, { ease: (t) => 1 - Math.pow(1 - t, 3), done: () => {
-                st.done = true; st.prize = segs[k];
-                for (const id of segs[k]) giveItem(id);
-                E.save.gift = E.today(); E.persist();
-                E.sfx('win'); E.confetti(); E.say('¡Te ha tocado un regalo!');
-              } });
-            },
-          });
+          E.button('wh_go', x + 120, y + h - 120, w - 240, 90, '¡Girar!', { color: '#ff8a1f', size: 40, cb: spin });
         }
       },
       back() { if (!st.spinning || st.done) finish(); },
@@ -909,6 +1312,7 @@ const E = {};
   E.openMissions = function () {
     const L = missionList(), st = missionState();
     E.openPopup({
+      gl: { kind: 'missions', items: () => L.map((m) => ({ id: m.id, name: m.name, k: m.k, v: Math.min(m.k, st.prog[m.id] || 0), done: st.done.includes(m.id) })), close: () => E.closePopup() },
       draw(g) {
         const w = 540, h = 230 + L.length * 120, x = (E.W - w) / 2, y = (E.H - h) / 2;
         E.panel(g, x, y, w, h, GAME.theme.panel);
@@ -946,9 +1350,12 @@ const E = {};
     });
     if (n % WORLD === 0) steps.push((next) => rewardPopup('¡Nuevo mundo!', 'Mundo ' + (worldOf(n + 1) + 1) + ': ' + E.worldName(worldOf(n + 1)), [], next, GAME.theme.mascot));
     const run = (i) => (i < steps.length ? steps[i](() => run(i + 1)) : openPreLevel(n + 1));
-    run(0);
+    if (window.GL && E.screen !== mapS) { goMap(); E.after(0.6, () => run(0)); } // como en los originales: se vuelve al mapa y allí sale el siguiente nivel
+    else run(0);
   }
   E.afterWin = afterWin;
+  E.testWin = () => win(); // para revisar las ventanas de ganar y perder
+  E.testLose = () => lose();
   E.goMap = () => goMap();
   E.openPreLevel = (n) => openPreLevel(n);
   function openPreLevel(n, challenge) {
@@ -961,21 +1368,25 @@ const E = {};
     const help = !challenge && ((E.save.fails && E.save.fails[n]) || 0) >= HELP_AT;
     if (help) SB.forEach((b) => chosen.add(b.id));
     if (spec.text) E.say(spec.text);
-    E.openPopup({
+    const pre = { n, spec, goals, SB, chosen, help, hard: E.hardness(n), have: (b) => (help ? Infinity : E.save.inv[b.id] || 0) }; // datos para el dibujo WebGL
+    const popP = {
+      hard: E.isHard(n), pre, // los estilos originales cambian de color en los niveles difíciles
       draw(g) {
+        if (window.GL && GL.popup && GL.popup(popP, g)) return; // ventana del juego original dibujada con WebGL
         const extra = (SB.length ? 150 : 0) + (E.save.streak ? 50 : 0) + 80 + (help ? 46 : 0);
         const w = 520, h = (spec.text ? 600 : 520) + extra, x = (E.W - w) / 2, y = (E.H - h) / 2;
         E.panel(g, x, y, w, h, GAME.theme.panel);
-        E.rr(g, x + 60, y - 30, w - 120, 76, 30);
-        g.fillStyle = GAME.theme.ribbon || GAME.theme.accent; g.fill();
-        g.lineWidth = 5; g.strokeStyle = '#fff'; g.stroke();
+        const skr = E.skin('ribbon');
+        if (skr) skr(g, x + 40, y - 40, w - 80, 96);
+        else { E.rr(g, x + 60, y - 30, w - 120, 76, 30); g.fillStyle = GAME.theme.ribbon || GAME.theme.accent; g.fill(); g.lineWidth = 5; g.strokeStyle = '#fff'; g.stroke(); }
         E.text(g, playS.challenge ? (playS.challenge.kind === 'fiesta' ? playS.challenge.emoji + ' Nivel especial' : '🏅 Desafío semanal') : 'Nivel ' + n, E.W / 2, y + 8, playS.challenge ? 36 : 44, '#fff');
         if (E.isHard(n)) E.text(g, E.hardness(n) === 2 ? '💀 ¡Nivel superdifícil! 💀' : '💀 ¡Nivel difícil!', E.W / 2, y + 82, 30, E.hardness(n) === 2 ? '#5b2a86' : '#ff5a5a', { stroke: '#fff', sw: 6 });
-        E.text(g, 'Objetivo', E.W / 2, y + 128, 34, GAME.theme.hudText || '#7a4b1f', { stroke: false });
-        E.rr(g, x + 40, y + 160, w - 80, 180, 20);
-        g.fillStyle = 'rgba(255,255,255,0.7)'; g.fill();
+        E.text(g, 'Objetivo', E.W / 2, y + 128, 34, GAME.theme.popText || GAME.theme.hudText || '#7a4b1f', { stroke: false });
+        const skg = E.skin('goalBox');
+        if (skg) skg(g, x + 40, y + 160, w - 80, 180);
+        else { E.rr(g, x + 40, y + 160, w - 80, 180, 20); g.fillStyle = 'rgba(255,255,255,0.7)'; g.fill(); }
         E.drawGoalBox(g, goals, x + 50, y + 165, w - 100, 170);
-        if (spec.text) E.wrapText(g, spec.text, E.W / 2, y + 395, w - 60, 27, GAME.theme.hudText || '#7a4b1f', { stroke: false });
+        if (spec.text) E.wrapText(g, spec.text, E.W / 2, y + 395, w - 60, 27, GAME.theme.popText || GAME.theme.hudText || '#7a4b1f', { stroke: false });
         let yy = y + (spec.text ? 470 : 370);
         if (E.save.streak) {
           const sb = streakBonus().map((id) => startDef(id).icon).join(' ');
@@ -987,7 +1398,7 @@ const E = {};
           yy += 46;
         }
         if (SB.length) {
-          E.text(g, 'Potenciadores para empezar', E.W / 2, yy + 10, 24, GAME.theme.hudText || '#7a4b1f', { stroke: false });
+          E.text(g, 'Potenciadores para empezar', E.W / 2, yy + 10, 24, GAME.theme.popText || GAME.theme.hudText || '#7a4b1f', { stroke: false });
           const bw = 110, gap = 24, x0 = E.W / 2 - (SB.length * bw + (SB.length - 1) * gap) / 2;
           SB.forEach((b, i) => {
             const have = help ? Infinity : E.save.inv[b.id] || 0, on = chosen.has(b.id);
@@ -1014,7 +1425,12 @@ const E = {};
         E.button('pl_x', x + w - 62, y - 22, 70, 70, '✕', { color: '#e8453c', r: 35, size: 34, cb: () => E.closePopup() });
       },
       back() { E.closePopup(); },
-    });
+    };
+    pre.play = () => { const bonus = streakBonus(); for (const id of chosen) { if (!help) E.save.inv[id] = Math.max(0, (E.save.inv[id] || 0) - 1); bonus.push(id); } E.persist(); E.closePopup(() => startLevel(n, null, bonus)); };
+    pre.toggle = (b) => { const have = pre.have(b); if (chosen.has(b.id)) chosen.delete(b.id); else if (have > 0) chosen.add(b.id); else E.floatText(E.W / 2, E.H * 0.6, 'Se consiguen con el cofre de estrellas y las rachas', '#fff', 24); };
+    pre.close = () => E.closePopup();
+    pre.duo = () => { E.duoOn = !E.duoOn; };
+    E.openPopup(popP);
   }
 
   // ---------------------------------------------------------------- pantalla de juego
@@ -1036,6 +1452,7 @@ const E = {};
   }
   function journalEnd() { playS.journal = null; if (E.save.resume) { delete E.save.resume; E.persist(); } }
   function startLevel(n, seed, bonus) {
+    if (!E.fast) E.preloadSfx(); // sonidos y voces listos antes de jugar
     E.clearTimers();
     playS.n = n;
     playS.spec = getLevel(n);
@@ -1107,15 +1524,18 @@ const E = {};
   playS.flyers = [];
   playS.layout = {};
   playS.resize = function () {
-    const top = 170, bottom = 140;
+    const gl = window.GL && GL.layout && GL.layout(); // el dibujo WebGL pone sus propias medidas (las del juego original)
+    const top = gl ? gl.top : 170, bottom = gl ? gl.bottom : 140;
     playS.layout = { hudH: top, barH: bottom, board: { x: 10, y: top + 8, w: E.W - 20, h: E.H - top - bottom - 16 } };
     if (playS.P && playS.P.layout) playS.P.layout(playS.layout.board);
   };
   const DUO_NAMES = ['la abuela', 'la visita'];
   const canAct = () => playS.state === 'playing' && !playS.P.busy && !E.popup;
+  E.explain = (t) => explain(t); // para las pruebas
   function explain(text) {
     E.say(text);
     E.openPopup({
+      gl: { kind: 'info', title: '¿Qué es esto?', text, ok: () => E.closePopup() }, // datos para el dibujo WebGL
       draw(g) {
         const w = 520, h = 330, x = (E.W - w) / 2, y = (E.H - h) / 2;
         E.panel(g, x, y, w, h, GAME.theme.panel);
@@ -1128,7 +1548,7 @@ const E = {};
   }
   playS.down = function (x, y) {
     playS.idle = 0;
-    if (playS.state !== 'playing') return;
+    if (playS.state !== 'playing') { if (playS.P && playS.P.finaleOn && playS.P.skipFinale) playS.P.skipFinale(); return; } // "Toca para saltar" el final
     if (playS.ask) { // modo pregunta: no se juega, se explica
       playS.ask = false;
       const t = playS.P.describe && playS.P.describe(x, y);
@@ -1174,7 +1594,9 @@ const E = {};
       playS.state = 'won';
       logAttempt('g', starsFor(P, playS.spec));
       journalEnd();
-      E.after(0.5, () => (P.finale ? P.finale(win) : win()));
+      // el estilo puede poner la animación de victoria del juego original antes de la ventana (los robots no la esperan)
+      const winShow = () => { const sw = E.skin('winShow'), ov = sw && !window.__pasada && sw(); if (ov) E.ovl = Object.assign({ t: 0, done: win }, ov); else win(); };
+      E.after(0.5, () => (P.finale ? P.finale(winShow) : winShow()));
     } else if (playS.timeTotal && E.timeLeft() <= 0 && !P.dead) {
       P.dead = true; P.deadMsg = '¡Se acabó el tiempo!';
       playS.state = 'lost';
@@ -1190,9 +1612,24 @@ const E = {};
   };
   playS.draw = function (g) {
     const P = playS.P, L = playS.layout, th = GAME.theme;
+    E.glBoard = false;
+    let glr;
+    if (window.GL && GL.play && (glr = GL.play({ P, L, n: playS.n, spec: playS.spec, flyers: playS.flyers, booster: playS.booster, state: playS.state, boosterLeft, useBooster, openPause, ask: () => { if (playS.state === 'playing' && playS.P.describe) playS.ask = !playS.ask; }, askOn: playS.ask,
+      prompt: playS.booster ? (GAME.boosters.find((bb) => bb.id === playS.booster) || {}).prompt || 'Toca una ficha' : playS.ask ? 'Toca una pieza para saber qué es' : null, // avisos sobre el tablero
+      duo: playS.duo ? { name: DUO_NAMES[playS.duo.turn], turn: playS.duo.turn, score: playS.duo.score } : null }))) {
+      if (glr === 'tiles2d') { // WebGL pinta fondo, tablero, cabecera y barra; las piezas, aquí encima (Dulces HD)
+        g.save();
+        if (E.shakeT > 0) g.translate((Math.random() - 0.5) * 14 * E.shakeT, (Math.random() - 0.5) * 14 * E.shakeT);
+        P.draw(g);
+        g.restore();
+        for (const f of playS.flyers) GAME.drawGoalIcon(g, f.gl, f.x, f.y, 52 * f.s);
+      }
+      return;
+    }
     // fondo
     const skbg = E.skin('playBg');
-    const bg = E.sprite('bg' + GAME.id, E.W, E.H, skbg ? (c, w, h) => skbg(c, w, h, L) : (c, w, h) => {
+    const bgk = E.skin('bgKey');
+    const bg = E.sprite('bg' + GAME.id + (bgk ? bgk(playS.n) : ''), E.W, E.H, skbg ? (c, w, h) => skbg(c, w, h, L) : (c, w, h) => {
       const gr = c.createLinearGradient(0, 0, 0, h);
       gr.addColorStop(0, th.bg[0]); gr.addColorStop(1, th.bg[1]);
       c.fillStyle = gr; c.fillRect(0, 0, w, h);
@@ -1228,12 +1665,20 @@ const E = {};
   };
   function drawHud(g, P, L) {
     const th = GAME.theme;
+    const ska = E.skin('hudAll');
+    if (ska) { // el estilo dibuja la cabecera entera, como en el juego original
+      ska(g, E.W, L.hudH, {
+        P, goals: P.goals, n: playS.n, spec: playS.spec, timeTotal: playS.timeTotal, timeLeft: E.timeLeft,
+        askOn: playS.ask, ask: (x, y, w, h) => E.hotspot('ask', x, y, w, h, () => { if (playS.state !== 'playing' || !playS.P.describe) return; playS.ask = !playS.ask; }),
+      });
+      return;
+    }
     const skh = E.skin('hud');
     if (skh) skh(g, E.W, L.hudH);
     else E.panel(g, 8, 8, E.W - 16, L.hudH - 12, { border: th.hudBorder || '#2e6f8e', top: th.hudTop || '#fff8e6', bottom: th.hudBottom || '#f3dfb5', r: 26 });
     // objetivos
     const gx = 22, gy = 20, gw = 300, gh = L.hudH - 40;
-    E.text(g, 'Objetivo', gx + gw / 2, gy + 14, 22, th.hudText || '#7a4b1f', { stroke: false, weight: '800' });
+    E.text(g, 'Objetivo', gx + gw / 2, gy + 14, 22, th.hudLabel || th.hudText || '#7a4b1f', { stroke: false, weight: '800' });
     const n = P.goals.length, cols = n <= 2 ? n : 2, rows = Math.ceil(n / cols);
     const cw = gw / cols, ch = (gh - 26) / rows;
     const sz = Math.min(cw * 0.48, ch * 0.78, 60);
@@ -1264,15 +1709,15 @@ const E = {};
     }
     // movimientos
     const mx = E.W - 170, mw = 150;
-    E.text(g, playS.timeTotal ? '⏱ Tiempo' : th.movesLabel || 'Movimientos', mx + mw / 2, 34, 22, th.hudText || '#7a4b1f', { stroke: false, weight: '800' });
+    E.text(g, playS.timeTotal ? '⏱ Tiempo' : th.movesLabel || 'Movimientos', mx + mw / 2, 34, 22, th.hudLabel || th.hudText || '#7a4b1f', { stroke: false, weight: '800' });
     if (!skh) { E.rr(g, mx, 52, mw, 92, 20); g.fillStyle = 'rgba(255,255,255,0.75)'; g.fill(); }
     if (playS.timeTotal) {
       const t = Math.max(0, Math.ceil(E.timeLeft())), lowT = t <= 10;
-      E.text(g, Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'), mx + mw / 2, 100, lowT ? 56 + Math.sin(E.t * 8) * 4 : 56, lowT ? '#ff4040' : '#3b6fb6', { stroke: '#fff', sw: 8 });
+      E.text(g, Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'), mx + mw / 2, 100, lowT ? 56 + Math.sin(E.t * 8) * 4 : 56, lowT ? '#ff4040' : th.movesColor || '#3b6fb6', { stroke: th.movesStroke || '#fff', sw: 8 });
     } else {
       const low = P.moves <= 5;
       const ms = low ? 64 + Math.sin(E.t * 8) * 4 : 64;
-      E.text(g, P.moves === Infinity ? '∞' : String(Math.max(0, P.moves)), mx + mw / 2, 100, ms, low ? '#ff4040' : '#3b6fb6', { stroke: '#fff', sw: 8 });
+      E.text(g, P.moves === Infinity ? '∞' : String(Math.max(0, P.moves)), mx + mw / 2, 100, ms, low ? '#ff4040' : th.movesColor || '#3b6fb6', { stroke: th.movesStroke || '#fff', sw: 8 });
     }
     // barra de puntos con las 3 estrellas (Pet Rescue)
     const sp = playS.spec;
@@ -1353,7 +1798,9 @@ const E = {};
   E.useBooster = (id) => useBooster(GAME.boosters.find((b) => b.id === id)); // para las pruebas
 
   function openPause() {
+    let ver0 = 0; try { ver0 = window.AndroidUpdate ? window.AndroidUpdate.version() : 0; } catch (e) { ver0 = 0; }
     E.openPopup({
+      gl: { kind: 'pause', resume: () => E.closePopup(), settings: () => E.closePopup(() => E.openSettings(openPause)), leave: () => E.closePopup(confirmExit), version: ver0 },
       draw(g) {
         const w = 480, h = 470, x = (E.W - w) / 2, y = (E.H - h) / 2;
         E.panel(g, x, y, w, h, GAME.theme.panel);
@@ -1369,6 +1816,33 @@ const E = {};
   }
   // ajustes de comodidad (desde la pausa y desde el mapa)
   E.dragK = () => ({ suave: 0.2, normal: 0.35, firme: 0.55 })[E.save.drag || 'normal'];
+  let secretTaps = 0, secretT = 0;
+  // teclado para poner a mano el nivel actual: el mapa salta a ese nivel
+  function openLevelPad() {
+    let val = '';
+    const press = (k) => {
+      if (k === '⌫') val = val.slice(0, -1);
+      else if (k === 'OK') { const n = parseInt(val, 10); if (n >= 1) { E.save.level = n; E.save.resume = null; E.persist(); E.closePopup(() => E.goMap()); } }
+      else if (val.length < 5) val += k;
+    };
+    E.openPopup({
+      gl: { kind: 'pad', val: () => val, press, cancel: () => E.closePopup() }, // datos para el dibujo WebGL
+      draw(g) {
+        const w = 520, h = 760, x = (E.W - w) / 2, y = (E.H - h) / 2;
+        E.panel(g, x, y, w, h, GAME.theme.panel);
+        E.text(g, 'Ir al nivel', E.W / 2, y + 60, 40, GAME.theme.accent, { stroke: '#fff', sw: 8 });
+        E.rr(g, x + 60, y + 100, w - 120, 90, 18); g.fillStyle = '#fff'; g.fill();
+        E.text(g, val || '—', E.W / 2, y + 147, 54, '#333', { stroke: false });
+        const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'OK'];
+        keys.forEach((k, i) => {
+          const bx = x + 50 + (i % 3) * 145, by = y + 215 + Math.floor(i / 3) * 112;
+          E.button('lp_' + i, bx, by, 130, 98, k, { color: k === 'OK' ? '#3cb93c' : k === '⌫' ? '#e8453c' : '#3f8fd9', size: 40, cb: () => press(k) });
+        });
+        E.button('lp_x', x + 130, y + h - 100, w - 260, 76, 'Cancelar', { color: '#9aa3ad', size: 30, cb: () => E.closePopup() });
+      },
+      back() { E.closePopup(); },
+    });
+  }
   E.openSettings = function (back) {
     const close = () => E.closePopup(back);
     const opts = [
@@ -1378,14 +1852,20 @@ const E = {};
       ['Ayudas a la', () => (E.save.hand === 'izq' ? 'izquierda' : 'derecha'), () => { E.save.hand = E.save.hand === 'izq' ? 'der' : 'izq'; }],
     ];
     const GFX = { baja: 'Sencillos', nueva: 'Nuevos', original: 'Como el original', real: 'Original' };
-    if (E.gfxList().length > 1) opts.unshift(['Gráficos', () => GFX[E.gfx], () => { const L = E.gfxList(); E.save.gfx = L[(L.indexOf(E.gfx) + 1) % L.length]; E.setGfx(E.save.gfx); }]);
+    if (E.gfxList().length > 1 && !window.GL) opts.unshift(['Gráficos', () => GFX[E.gfx], () => { const L = E.gfxList(); E.save.gfx = L[(L.indexOf(E.gfx) + 1) % L.length]; E.setGfx(E.save.gfx); }]);
     if (GAME.usesDrag) opts.push(['Deslizar', () => ({ suave: 'Suave', normal: 'Normal', firme: 'Firme' })[E.save.drag || 'normal'], () => { E.save.drag = { suave: 'normal', normal: 'firme', firme: 'suave' }[E.save.drag || 'normal']; }]);
+    const sm = E.skin('sfx');
+    if (sm && Object.keys(sm).some((k) => E.isNarrator(k) && sm[k])) opts.push(['Voces del narrador', () => (E.save.noNarr ? 'No' : 'Sí'), () => { E.save.noNarr = !E.save.noNarr; }]);
     if (GAME.usesAim) opts.push(['Disparar', () => (E.save.confirmShot ? 'Tocando a mamá' : 'Al soltar'), () => { E.save.confirmShot = !E.save.confirmShot; }]);
+    const secret = () => { const now = Date.now(); secretTaps = now - secretT < 1500 ? secretTaps + 1 : 1; secretT = now; if (secretTaps >= 5) { secretTaps = 0; openLevelPad(); } };
     E.openPopup({
+      gl: { kind: 'settings', opts: opts.map(([name, val, act]) => ({ name, val, act: () => { act(); E.persist(); } })), close, secret }, // datos para el dibujo WebGL
       draw(g) {
         const w = 500, h = 170 + opts.length * 96 + 100, x = (E.W - w) / 2, y = (E.H - h) / 2;
         E.panel(g, x, y, w, h, GAME.theme.panel);
         E.text(g, '⚙️ Ajustes', E.W / 2, y + 60, 42, GAME.theme.accent, { stroke: '#fff', sw: 8 });
+        // oculto: 5 toques seguidos en el título para elegir el nivel (para quien cuida la tablet)
+        E.hotspot('st_secret', x + 80, y + 20, w - 160, 80, secret);
         opts.forEach(([name, val, act], i) => E.button('st_' + i, x + 40, y + 110 + i * 96, w - 80, 82, name + ': ' + val(), { color: '#3f8fd9', size: 28, cb: () => { act(); E.persist(); } }));
         E.button('st_ok', x + 110, y + h - 120, w - 220, 90, 'Listo', { color: '#3cb93c', size: 34, cb: close });
       },
@@ -1394,14 +1874,16 @@ const E = {};
   };
   // confirmación para no perder la partida por un toque sin querer
   function confirmExit() {
+    const leave = () => E.closePopup(() => { logAttempt('s'); E.save.fails = E.save.fails || {}; E.save.fails[playS.n] = (E.save.fails[playS.n] || 0) + 1; journalEnd(); E.save.streak = 0; E.persist(); goMap(); });
     E.openPopup({
+      gl: { kind: 'exit', stay: () => E.closePopup(), leave },
       draw(g) {
         const w = 500, h = 430, x = (E.W - w) / 2, y = (E.H - h) / 2;
         E.panel(g, x, y, w, h, GAME.theme.panel);
         E.text(g, '¿Salir del nivel?', E.W / 2, y + 70, 42, GAME.theme.accent, { stroke: '#fff', sw: 8 });
         E.text(g, 'Si sales, tendrás que empezarlo otra vez', E.W / 2, y + 135, 26, '#7a4b1f', { stroke: false });
         E.button('cx_no', x + 50, y + 185, w - 100, 96, 'No, seguir jugando', { color: '#3cb93c', size: 32, cb: () => E.closePopup() });
-        E.button('cx_si', x + 50, y + 300, w - 100, 90, 'Sí, salir', { color: '#e8453c', size: 30, cb: () => E.closePopup(() => { logAttempt('s'); E.save.fails = E.save.fails || {}; E.save.fails[playS.n] = (E.save.fails[playS.n] || 0) + 1; journalEnd(); E.save.streak = 0; E.persist(); goMap(); }) });
+        E.button('cx_si', x + 50, y + 300, w - 100, 90, 'Sí, salir', { color: '#e8453c', size: 30, cb: leave });
       },
       back() { E.closePopup(); },
     });
@@ -1518,8 +2000,9 @@ const E = {};
     const words = ['¡Muy bien!', '¡Genial!', '¡Fantástico!', '¡Estupendo!', '¡Bravo!', '¡Increíble!'];
     const word = words[n % words.length];
     const pop = {
-      starsShown: 0,
+      starsShown: 0, win: { n, score: P.score || 0, hard: E.hardness(n), next: () => E.closePopup(() => afterWin(n)) }, // datos para el dibujo WebGL
       draw(g) {
+        if (window.GL && GL.popup && GL.popup(pop, g)) return; // ventana del juego original dibujada con WebGL
         const w = 500, h = 500, x = (E.W - w) / 2, y = (E.H - h) / 2;
         E.panel(g, x, y, w, h, GAME.theme.panel);
         E.text(g, word, E.W / 2, y + 70, 54, '#ffd23f', { stroke: '#a85a00', sw: 10 });
@@ -1548,8 +2031,11 @@ const E = {};
     E.persist();
     E.sfx('lose');
     const dead = P.dead;
-    E.openPopup({
+    const retry = () => E.closePopup(() => (playS.challenge ? openPreLevel(n, true) : openPreLevel(n)));
+    const popL = {
+      lost: { n, dead, msg: dead ? (P.deadMsg || 'No quedan jugadas') : null, goals: P.goals, score: P.score || 0, retry, close: () => E.closePopup(goMap) }, // datos para el dibujo WebGL
       draw(g) {
+        if (window.GL && GL.popup && GL.popup(popL, g)) return;
         const w = 500, h = 540, x = (E.W - w) / 2, y = (E.H - h) / 2;
         E.panel(g, x, y, w, h, GAME.theme.panel);
         E.text(g, dead ? '¡Vaya!' : '¡Casi!', E.W / 2, y + 70, 54, '#ff7a3c', { stroke: '#fff', sw: 10 });
@@ -1562,19 +2048,23 @@ const E = {};
         E.button('l_map', x + w - 62, y - 22, 70, 70, '✕', { color: '#e8453c', r: 35, size: 34, cb: () => E.closePopup(goMap) });
       },
       back() { E.closePopup(goMap); },
-    });
+    };
+    E.openPopup(popL);
   }
 
   // ---------------------------------------------------------------- bucle principal
   E.screen = null;
-  E.setScreen = function (s) { E.screen = s; if (s.enter) s.enter(); };
+  E.setScreen = function (s) { E.screen = s; if (s.enter) s.enter(); E.music(s === playS ? 'game' : 'map'); };
 
   function toLocal(ev) {
     const r = cv.getBoundingClientRect();
     return { x: ((ev.clientX - r.left) / r.width) * E.W, y: ((ev.clientY - r.top) / r.height) * E.H };
   }
   let activePointer = null;
-  cv.addEventListener('pointerdown', (ev) => {
+  // los toques se escuchan en la página y no en el lienzo: con WebGL, el lienzo 2D vacío se esconde (visibility) para que el
+  // navegador no lo mezcle en cada fotograma, y un lienzo escondido no recibe toques
+  const inp = document.body;
+  inp.addEventListener('pointerdown', (ev) => {
     ensureAudio();
     if (activePointer !== null) return;
     if (ev.pointerType === 'touch' && ev.width > 70 && ev.height > 70) return; // la palma de la mano no cuenta
@@ -1585,7 +2075,7 @@ const E = {};
     if (E.popup) return;
     E.screen && E.screen.down && E.screen.down(p.x, p.y);
   });
-  cv.addEventListener('pointermove', (ev) => {
+  inp.addEventListener('pointermove', (ev) => {
     if (ev.pointerId !== activePointer) return;
     const p = toLocal(ev);
     if (pressed) return;
@@ -1605,12 +2095,12 @@ const E = {};
     if (E.popup) return;
     E.screen && E.screen.up && E.screen.up(p.x, p.y);
   }
-  cv.addEventListener('pointerup', (ev) => endPointer(ev, false));
-  cv.addEventListener('pointercancel', (ev) => endPointer(ev, true));
+  inp.addEventListener('pointerup', (ev) => endPointer(ev, false));
+  inp.addEventListener('pointercancel', (ev) => endPointer(ev, true));
 
   // Pausa automática al salir de la app o apagar la pantalla
   window.onAndroidPause = function () { if (E.screen === playS && playS.state === 'playing' && !E.popup) openPause(); E.sendData('salir', true); return 'ok'; };
-  document.addEventListener('visibilitychange', () => { if (document.hidden) window.onAndroidPause(); else E.loadCalendar(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { window.onAndroidPause(); E.musicPause(true); } else { E.loadCalendar(); E.musicPause(false); } });
   E.loadCalendar();
   // Botón "atrás" de Android: devuelve 'exit' si hay que salir de la app.
   window.onAndroidBack = function () {
@@ -1679,16 +2169,26 @@ const E = {};
     if (E.screen && E.screen.update) E.screen.update(dt);
 
     if (E.fast) return; // repitiendo una partida a medias: solo la lógica
-    prevBtns = btns; btns = [];
+    prevBtns = btns; btns = []; E.popup2D = false;
     ctx.setTransform(E.scale, 0, 0, E.scale, 0, 0);
     ctx.clearRect(0, 0, E.W, E.H);
+    if (drawCarga(ctx)) { if (!stepping) requestAnimationFrame(frame); return; } // sin esto el bucle se paraba en la carga
     if (E.screen) E.screen.draw(ctx);
     if (E.popup) {
       // los botones del fondo no deben responder con una ventana abierta
       btns = [];
       drawPopup(ctx);
     }
-    drawParts(ctx, dt);
+    // efectos: si WebGL pinta este fotograma, también los dibuja él (encima de todo); si no, el lienzo de siempre
+    const glfx = !!(window.GL && GL.fx && GL.fxOn && GL.fxOn());
+    if (glfx) { fxCmds.length = 0; drawKCuts(null, dt); drawKParts(null, dt); drawParts(null, dt); GL.fx(fxCmds); }
+    if (window.GL && GL.frameEnd) GL.frameEnd(); // WebGL: pinta lo de este fotograma (tablero y, si la hay, su ventana) o se oculta
+    if (!glfx) { drawKCuts(ctx, dt); drawKParts(ctx, dt); drawParts(ctx, dt); }
+    drawExclaims(ctx, dt);
+    if (E.ovl) { // animación por encima de todo (p. ej. la de "nivel superado" del original); al acabar sigue el juego
+      E.ovl.t += dt; E.ovl.draw(ctx, E.ovl.t);
+      if (E.ovl.t >= E.ovl.dur) { const d = E.ovl.done; E.ovl = null; if (d) d(); }
+    }
     if (!stepping) { bgWork(); requestAnimationFrame(frame); }
   }
   // Para los robots de prueba: avanza el juego dt segundos sin esperar a la pantalla
@@ -1699,10 +2199,38 @@ const E = {};
   document.addEventListener('visibilitychange', () => {
     if (ac) { if (document.hidden) ac.suspend(); else ac.resume(); }
   });
+  // pantalla de carga del juego original (GL.carga en games/<juego>/gl.js, piezas en privado/carga/) mientras se cargan
+  // sus imágenes: así nunca se ve el dibujo sencillo al abrir la app. Piezas: { f, x, y (fracción de la pantalla),
+  // w (fracción del ancho), anim: 'giro' | 'columpio', piv: [px, py] (punto de giro en la pieza) }
+  const carga = { img: {}, t0: 0 };
+  function drawCarga(g) {
+    const C = window.GL && GL.carga;
+    if (!C || E.wantGfx !== 'real' || (E.gfx === 'real' && (!GL.listo || GL.listo()))) return false;
+    if (!carga.pedido) { carga.pedido = true; carga.t0 = E.t; for (const p of [C.fondo].concat(C.piezas || [])) if (p && p.f) { const im = new Image(); im.onload = () => { carga.img[p.f] = im; }; im.src = E.privBase() + 'carga/' + p.f; } }
+    if (E.t - carga.t0 > 20) return false; // si no cargan (sin imágenes), el dibujo de siempre
+    g.fillStyle = C.color || '#000'; g.fillRect(0, 0, E.W, E.H);
+    const F = C.fondo && carga.img[C.fondo.f];
+    if (F) {
+      if (C.fondo.modo === 'mosaico') { const k = (C.fondo.k || 1) * (E.W / 750), w = F.width * k, h = F.height * k; for (let y = 0; y < E.H; y += h) for (let x = 0; x < E.W; x += w) g.drawImage(F, x, y, w + 0.5, h + 0.5); }
+      else g.drawImage(F, 0, 0, E.W, E.H);
+    }
+    for (const p of C.piezas || []) {
+      const im = carga.img[p.f]; if (!im) continue;
+      const w = p.w * E.W, h = (w * im.height) / im.width, x = p.x * E.W, y = p.y * E.H, t = E.t - carga.t0;
+      const [px, py] = p.piv || [0.5, 0.5];
+      g.save(); g.translate(x, y);
+      if (p.anim === 'giro') g.rotate(t * (p.vel || 6));
+      else if (p.anim === 'columpio') g.rotate(Math.sin(t * (p.vel || 2.2)) * (p.amp || 0.12));
+      g.drawImage(im, -w * px, -h * py, w, h); g.restore();
+    }
+    return true;
+  }
   E.boot = function () {
     loadSkinImages();
     const qg = /[?&]gfx=(\w+)/.exec(location.search); // para probar: index.html?gfx=original
-    E.wantGfx = qg ? qg[1] : E.save.gfx || 'baja'; // si es un estilo con imágenes, se pone en cuanto carguen
+    // el original en cuanto carguen sus imágenes (sin ellas, como en la página pública, se queda en 'baja'); con WebGL
+    // (games/<juego>/gl.js) es una copia 1:1 del juego y no hay otro estilo que elegir
+    E.wantGfx = qg ? qg[1] : window.GL ? 'real' : E.save.gfx || 'real';
     E.setGfx(E.wantGfx);
     E.resize();
     E.setScreen(mapS);

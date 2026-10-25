@@ -3,7 +3,7 @@
 
 const GAME = {
   id: 'cubos',
-  title: 'Cubos Locos',
+  title: 'Cubos HD',
   theme: {
     mascot: '👧',
     accent: '#ff6a2b',
@@ -287,7 +287,8 @@ const GAME = {
     if (t.kind === 'disco') g.rotate(Math.sin(E.t * 2 + t.id) * 0.15);
     const k = t.kind === 'bomb' ? 0.95 : t.kind === 'balloon' || t.kind === 'duck' ? 1.12 : 1;
     g.drawImage(spr, (-s * k) / 2, (-s * k) / 2, s * k, s * k);
-    if (t.caged) { // jaula encima del cubo
+    const skc = E.skin('cage');
+    if (t.caged && !(skc && skc(g, s))) { // jaula encima del cubo
       g.strokeStyle = '#5b3a1d'; g.lineWidth = s * 0.07;
       for (let i = 0; i < 4; i++) { const x = -s * 0.36 + i * s * 0.24; g.beginPath(); g.moveTo(x, -s * 0.44); g.lineTo(x, s * 0.44); g.stroke(); }
       g.lineWidth = s * 0.09; g.beginPath(); g.moveTo(-s * 0.46, -s * 0.42); g.lineTo(s * 0.46, -s * 0.42); g.moveTo(-s * 0.46, s * 0.42); g.lineTo(s * 0.46, s * 0.42); g.stroke();
@@ -318,7 +319,7 @@ const GAME = {
     else if (gl.type === 'pinwheel') spr = pinwheelSprite([0, 1, 2, 3], s);
     else if (gl.type === 'bee') spr = E.emojiSprite('🐝', s);
     else if (gl.type === 'curtain') spr = curtainSprite(s);
-    else if (XOBS[gl.type]) spr = E.emojiSprite(XOBS[gl.type].ch, s);
+    else if (XOBS[gl.type]) spr = (skt && skt({ kind: gl.type, hp: XOBS[gl.type].hp }, s, COLORS)) || E.emojiSprite(XOBS[gl.type].ch, s);
     else if (gl.type === 'piggy') spr = piggySprite(1, s);
     else if (gl.type === 'stone') spr = stoneSprite(true, s);
     else if (gl.type === 'gum') spr = gumSprite(false, s);
@@ -484,7 +485,7 @@ const GAME = {
     if (o.kind === 'pinwheel') {
       let i = color == null ? o.cols.findIndex((x) => x >= 0) : o.cols.indexOf(color);
       if (i < 0) return;
-      o.cols = o.cols.slice(); o.cols[i] = -1;
+      o.cols = o.cols.slice(); o.cols[i] = -1 - o.cols[i]; // en negativo, pero sin perder su color (para dibujarlo)
       if (o.cols.every((x) => x < 0)) { S.grid[r][c] = null; K.remove(o, delay); K.collect('pinwheel', undefined, o, delay); } else K.hurt(o, delay);
       return;
     }
@@ -563,7 +564,7 @@ const GAME = {
       case 'hanoi': { // pirámide de aros: solo el color del aro de arriba
         const i = o.cols.findIndex((x) => x >= 0);
         if (i < 0 || (fromMatch && color !== o.cols[i])) return;
-        o.cols = o.cols.slice(); o.cols[i] = -1;
+        o.cols = o.cols.slice(); o.cols[i] = -1 - o.cols[i]; // en negativo, pero sin perder su color (para dibujarlo)
         if (o.cols.every((x) => x < 0)) finish(); else K.hurt(o, delay);
         return;
       }
@@ -587,7 +588,7 @@ const GAME = {
       case 'allColors': {
         let i = color == null ? o.cols.findIndex((x) => x >= 0) : o.cols.indexOf(color);
         if (i < 0) return;
-        o.cols = o.cols.slice(); o.cols[i] = -1;
+        o.cols = o.cols.slice(); o.cols[i] = -1 - o.cols[i]; // en negativo, pero sin perder su color (para dibujarlo)
         if (o.cols.every((x) => x < 0)) finish(); else K.hurt(o, delay);
       }
     }
@@ -596,8 +597,9 @@ const GAME = {
     K.remove(t, delay);
     if (t.kind === 'rocket') {
       K.fx({ type: 'rocket', dir: t.dir, r, c, delay });
-      if (t.dir === 'h') for (let cc = 0; cc < S.C; cc++) { if (cc !== c) damage(S, r, cc, delay + Math.abs(cc - c) * 0.035, K); }
-      else for (let rr = 0; rr < S.R; rr++) { if (rr !== r) damage(S, rr, c, delay + Math.abs(rr - r) * 0.035, K); }
+      // los rotores van a UiConstants.RotorSpeed = 20 casillas por segundo
+      if (t.dir === 'h') for (let cc = 0; cc < S.C; cc++) { if (cc !== c) damage(S, r, cc, delay + Math.abs(cc - c) * 0.05, K); }
+      else for (let rr = 0; rr < S.R; rr++) { if (rr !== r) damage(S, rr, c, delay + Math.abs(rr - r) * 0.05, K); }
     } else if (t.kind === 'bomb') {
       K.fx({ type: 'bomb', r, c, rad: 1, delay });
       for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) if (dr || dc) damage(S, r + dr, c + dc, delay + 0.05 * Math.max(Math.abs(dr), Math.abs(dc)), K);
@@ -1272,9 +1274,12 @@ const GAME = {
     const all = () => { const a = []; for (let r = 0; r < S.R; r++) for (let c = 0; c < S.C; c++) if (S.grid[r][c]) a.push([S.grid[r][c], r, c]); return a; };
 
     P.layout = function (area) {
+      const gl = window.GL && GL.boardLayout && GL.boardLayout(S.C, S.R, area); // con WebGL, las medidas del Toy Blast real
+      if (gl) { ts = gl.ts; bx = gl.x; by = gl.y; } else {
       ts = Math.min(area.w / S.C, area.h / S.R, 78);
       bx = area.x + (area.w - ts * S.C) / 2;
       by = area.y + (area.h - ts * S.R) / 2;
+      }
       if (!P.placed) {
         P.placed = true;
         for (const [t, r, c] of all()) { t.x = cx(c); t.y = cy(r) - (S.R + 2) * ts; t.vy = 0; t.delay = 0.3 + (S.R - r) * 0.03 + c * 0.02; }
@@ -1289,7 +1294,7 @@ const GAME = {
       remove(t, delay, m) {
         if (m && m.mode === 'duck') delay = hold + 0.45;
         dying.push({ t, delay: delay || 0, m, age: 0 });
-        hold = Math.max(hold, (delay || 0) + 0.18);
+        hold = Math.max(hold, (delay || 0) + (m && m.mode === 'bucket' ? 1.125 + 0.25 : 0.18));
       },
       created(t, r, c, delay) { t.x = cx(c); t.y = cy(r); t.sc = 0; t.vy = 0; E.tween(t, { sc: 1 }, 0.35, { delay, ease: E.ease.outBack }); E.after(delay, () => E.sfx('special')); },
       fx(f) { fxs.push(Object.assign({ age: 0 }, f)); hold = Math.max(hold, f.delay + 0.3); },
@@ -1351,6 +1356,12 @@ const GAME = {
         E.tween(t, { rot: 0.25 }, 0.06, { done: () => E.tween(t, { rot: -0.25 }, 0.1, { done: () => E.tween(t, { rot: 0 }, 0.06) }) });
       }
     };
+    // potenciadores con su Spine de Toy Blast (los dibuja gl.js); velocidades en casillas por segundo
+    const TRAIN_V = 12, VAC_V = 9;
+    function boostFx(b, r, c, dur) {
+      if (!(window.GL && GL.drawSpine && E.gfx === 'real')) return false;
+      K.fx({ type: 'boost', b, r, c, delay: 0, dur }); hold = Math.max(hold, dur * 0.6); return true;
+    }
     function useTargetBooster(id, r, c) {
       if (id === 'hammer') {
         const t = S.grid[r][c];
@@ -1358,19 +1369,23 @@ const GAME = {
         if (t.kind === 'box' || t.kind === 'egg' || t.kind === 'pumpkin' || t.kind === 'gum' || t.kind === 'ufo' || t.kind === 'piggy') t.hp = 1;
         if (t.kind === 'stone' && t.shell) { t.shell = false; }
         if (t.kind === 'ball') t.cols = [t.cols.find((x) => x >= 0), -1, -1, -1];
-        damage(S, r, c, 0, K);
-        E.sfx('bomb'); E.shake(0.2);
+        const glb = boostFx('drill', r, c, 0.75); // el taladro de Toy Blast (Spine "drill") taladra y rompe
+        damage(S, r, c, glb ? 0.45 : 0, K);
+        E.after(glb ? 0.45 : 0, () => { E.sfx('bomb'); E.shake(0.2); });
       } else if (id === 'vacuum') {
-        K.fx({ type: 'rocket', dir: 'v', r, c, delay: 0 });
-        for (let rr = 0; rr < S.R; rr++) damage(S, rr, c, Math.abs(rr - r) * 0.035, K);
+        if (boostFx('vacuum', r, c, (S.R + 8) / VAC_V)) for (let rr = 0; rr < S.R; rr++) damage(S, rr, c, (rr + 0.5) / VAC_V, K); // la aspiradora baja por la columna
+        else { K.fx({ type: 'rocket', dir: 'v', r, c, delay: 0 }); for (let rr = 0; rr < S.R; rr++) damage(S, rr, c, Math.abs(rr - r) * 0.035, K); }
         E.sfx('rocket');
       } else if (id === 'bucket') {
         const t = S.grid[r][c];
         if (!t || t.kind !== 'cube') return;
         const targets = [];
         for (let rr = 0; rr < S.R; rr++) for (let cc = 0; cc < S.C; cc++) { const o = cell(S, rr, cc); if (o && o.kind === 'cube' && o.color === t.color) targets.push([rr, cc]); }
-        K.fx({ type: 'disco', r, c, targets, delay: 0, color: t.color });
-        targets.forEach(([rr, cc], i) => damage(S, rr, cc, 0.25 + i * 0.015, K));
+        // como BucketCollectCubesAnimation de Toy Blast: el balde de ese color sube por debajo de la columna y los cubos
+        // vuelan por encima (4 casillas) y caen dentro, cada uno en 0,6–1 s; en total 1,125 s
+        K.fx({ type: 'bucket', r, c, delay: 0, color: t.color, dur: 1.375 }); // 1,125 s y 0,25 s más mientras se va
+        const KB = Object.assign({}, K, { remove: (tt, d, m) => K.remove(tt, d, m || { mode: 'bucket', c, dur: 0.6 + Math.random() * 0.4, rx: Math.random() * 2 - 1, ry: Math.random() * 2 - 1 }) });
+        targets.forEach(([rr, cc]) => damage(S, rr, cc, 0, KB));
         E.sfx('magic');
       } else if (id === 'brush') {
         // Turbo Pincel: "cambia el color de un solo cubo" (al color de sus vecinos que forme el grupo más grande)
@@ -1383,13 +1398,14 @@ const GAME = {
           if (nn > bestN) { bestN = nn; bestCol = col; }
         }
         if (bestCol < 0) return;
-        t.color = bestCol; t.sc = 0.6; E.tween(t, { sc: 1 }, 0.35, { ease: E.ease.outBack }); E.burst(t.x, t.y, COLORS[bestCol], 8, { size: 9 });
+        const brushed = () => { t.color = bestCol; t.sc = 0.6; E.tween(t, { sc: 1 }, 0.35, { ease: E.ease.outBack }); if (!(window.GL && GL.ufx && GL.ufx('CubeDestroyParticle' + ['Red', 'Yellow', 'Blue', 'Green', 'Purple', 'Orange'][bestCol], t.x, t.y, ts))) E.burst(t.x, t.y, COLORS[bestCol], 8, { size: 9 }); };
+        if (boostFx('brush', r, c, 1.3)) { hold = Math.max(hold, 1.3); E.after(0.73, brushed); } else brushed(); // el pincel llega ("gelme"), pinta y se va ("gitme")
         E.sfx('magic');
         afterAction(); updateHints();
         return;
       } else if (id === 'train') {
-        K.fx({ type: 'rocket', dir: 'h', r, c, delay: 0 });
-        for (let cc = 0; cc < S.C; cc++) damage(S, r, cc, Math.abs(cc - c) * 0.035, K);
+        if (boostFx('train', r, c, (S.C + 10) / TRAIN_V)) for (let cc = 0; cc < S.C; cc++) damage(S, r, cc, (cc + 0.5) / TRAIN_V, K); // el tren cruza la fila de izquierda a derecha
+        else { K.fx({ type: 'rocket', dir: 'h', r, c, delay: 0 }); for (let cc = 0; cc < S.C; cc++) damage(S, r, cc, Math.abs(cc - c) * 0.035, K); }
         E.sfx('rocket');
       } else if (id === 'bomb') {
         damage(S, r, c, 0, K);
@@ -1475,16 +1491,34 @@ const GAME = {
         if (t.x == null) { t.x = tx; t.y = ty; }
         if (t.delay > 0) { t.delay -= dt; moving = true; continue; }
         if (Math.abs(t.x - tx) > 0.5) { t.x += (tx - t.x) * Math.min(1, dt * 14); moving = true; } else t.x = tx;
+        if (t.y < ty - 0.5 || t.vb) {
+          // caída de Toy Blast (SpecialFallHelper.FallWithAirResistance, leída del código): en cada fotograma la velocidad
+          // baja Gravity = 1 casilla/s hasta MaxVelocity = 25; al llegar rebota una vez (MaxHitCount = 1) con
+          // Elasticity = 0,25 de la velocidad, y mientras sube frena además Friction = 1 por fotograma. Aquí a 60 fps.
+          const v = t.vb != null ? t.vb : -(t.vy || 0) / ts; // casillas/s, hacia arriba positivo
+          let nv = Math.max(-25, v - 60 * dt);
+          if (nv > 0) nv -= 60 * dt; // subiendo frena el doble
+          t.y -= nv * ts * dt; moving = true;
+          if (t.y >= ty) {
+            if (!t.hit && nv < -2) { t.hit = 1; t.y = ty; t.vb = -nv * 0.25; }
+            else { t.y = ty; t.vb = null; t.vy = 0; t.hit = 0; }
+          } else t.vb = nv;
+          continue;
+        }
         if (t.y < ty - 0.5) {
-          t.vy = (t.vy || 0) + 3200 * dt;
+          const tm = E.skin('timing'); // el estilo puede dar la caída del original (casillas/s²) y su rebote
+          t.vy = (t.vy || 0) + (tm ? tm.gravity * ts : 3200) * dt;
           t.y += t.vy * dt;
           moving = true;
           if (t.y >= ty) {
             t.y = ty;
-            if (t.vy > 500) { t.sq = 1; E.tween(t, { sq: 0 }, 0.18); }
+            if (tm && tm.bounce) t.bt = 0.1;
+            else if (t.vy > 500) { t.sq = 1; E.tween(t, { sq: 0 }, 0.18); }
             t.vy = 0;
           }
         } else if (t.y > ty) { t.y = ty; t.vy = 0; }
+        // rebote al llegar (Toy Blast: sube un poco y vuelve)
+        if (t.bt > 0) { t.bt -= dt; const tm = E.skin('timing'); t.oy = t.bt > 0 && tm ? -tm.bounce * ts * Math.sin(Math.PI * (1 - t.bt / 0.1)) : 0; }
       }
       for (let i = dying.length - 1; i >= 0; i--) {
         const d = dying[i];
@@ -1496,14 +1530,14 @@ const GAME = {
         if (d.delay > 0) { d.delay -= dt; continue; }
         if (d.age === 0) startDeath(d);
         d.age += dt;
-        if (d.age > 0.3) dying.splice(i, 1);
+        if (d.age > (d.m && d.m.dur ? d.m.dur : 0.3)) dying.splice(i, 1);
       }
       for (let i = fxs.length - 1; i >= 0; i--) {
         const f = fxs[i];
         if (f.delay > 0) { f.delay -= dt; continue; }
         if (f.age === 0) startFx(f);
         f.age += dt;
-        if (f.age > 0.6) fxs.splice(i, 1);
+        if (f.age > (f.dur || (f.type === 'rocket' ? 0.8 : 0.6))) fxs.splice(i, 1); // los rotores salen del tablero
       }
       const was = P.busy;
       P.busy = moving || dying.length > 0 || hold > 0 || !!P.finaleOn;
@@ -1515,13 +1549,17 @@ const GAME = {
       d.x = t.x; d.y = t.y;
       if (d.m && d.m.mode === 'merge') {
         d.age = 0.0001;
-        E.tween(d, { x: cx(d.m.c), y: cy(d.m.r) }, 0.2, { ease: E.ease.inQuad });
+        E.tween(d, { x: cx(d.m.c), y: cy(d.m.r) }, 0.25, { ease: E.ease.inQuad }); // UiConstants.SpecialItemCreationDuration
         return;
       }
       d.age = 0.0001;
+      if (d.m && d.m.mode === 'bucket') return; // vuela al balde (lo dibuja WebGL)
+      if (window.GL && GL.ufx && ufxFor(t) && GL.ufx(ufxFor(t), t.x, t.y, ts)) { d.ufx = true; return; } // el efecto de Toy Blast (ParticlePrefabs); la pieza ya no se dibuja
       const skp = E.skin('pop');
       if (skp && skp(t, t.x, t.y, ts, COLORS)) return;
-      if (t.kind === 'cube') E.burst(t.x, t.y, [COLORS[t.color], E.shade(COLORS[t.color], 0.4)], 7, { size: 11 });
+      const skBr = E.skin('breakFx'); // el estilo puede romper la pieza en trozos de su imagen
+      if (skBr && skBr(t)) { /* hecho */ }
+      else if (t.kind === 'cube') E.burst(t.x, t.y, [COLORS[t.color], E.shade(COLORS[t.color], 0.4)], 7, { size: 11 });
       else if (t.kind === 'box') { E.burst(t.x, t.y, ['#8a5a2b', '#c98b48', '#e0b07a'], 10, { size: 12 }); E.sfx('land', 1.2); }
       else if (t.kind === 'balloon') { E.burst(t.x, t.y, ['#ff4d4d', '#ffffff'], 10, { size: 9 }); E.sfx('pop', 1.6); }
       else if (t.kind === 'duck') { E.floatText(t.x, t.y - 20, '¡Bien!', '#ffe14d', 36); E.sfx('rescue'); }
@@ -1534,12 +1572,21 @@ const GAME = {
       else if (t.kind === 'crate' || t.kind === 'cuckoo' || t.kind === 'pinwheel') { E.burst(t.x, t.y, ['#c98b48', '#ffd23f', '#fff'], 14, { size: 11 }); E.sfx('bomb', 1.2); }
       else if (t.kind === 'bomb') { E.burst(t.x, t.y, ['#ff9f1c', '#ffd23f', '#555'], 18, { size: 14, speed: 400 }); E.shake(0.3); }
     }
+    // efecto de Toy Blast al romperse cada pieza (campos de su ParticlePrefabs)
+    const UCN = ['Red', 'Yellow', 'Blue', 'Green', 'Purple', 'Orange'];
+    const UFX = { balloon: 'BalloonExplodeParticle', egg: 'EasterEggParticles', ball: 'BeachBallParticles', pumpkin: 'PumpkinParticles', box: 'LegoParticles',
+      ice: 'IceParticles', stone: 'RockParicles', piggy: 'RockParicles', ufo: 'UfoExplodeParticles', gum: 'GumParticles', duck: 'DuckParticlesPrefab', rduck: 'DuckParticlesPrefab',
+      cuckoo: 'CuckooExplodeParticles', safe: 'SafeParticles', soap: 'SoapExplodeParticles', curtain: 'CurtainItemParticles', compass: 'CompassExplodeParticles', orb: 'OrbExplodeParticlePrefab',
+      hive: 'HiveExplodePrefab', crate: 'LegoParticles' };
+    const ufxFor = (t) => (t.kind === 'cube' ? 'CubeDestroyParticle' + UCN[t.color] : UFX[t.kind]);
     function startFx(f) {
       if (f.type === 'bomb') E.sfx('bomb');
       if (f.type === 'rocket') E.sfx('rocket');
       if (f.type === 'disco') E.sfx('magic');
     }
 
+    // lo que necesita el dibujo con WebGL (games/cubos/gl.js)
+    P.glState = () => ({ S, ts, bx, by, dying, fxs, hintTiles, bubAnim, cx, cy, drawTile, COLORS, fin, busy: P.busy });
     P.draw = function (g) {
       // fondo del tablero
       g.save();
@@ -1575,9 +1622,9 @@ const GAME = {
         if (hset && hset.has(t)) {
           const k = 1 + Math.abs(Math.sin(hintTiles.t * 5)) * 0.12;
           const old = t.sc; t.sc = (old == null ? 1 : old) * k;
-          drawTile(g, t, t.x, t.y, ts);
+          drawTile(g, t, t.x, t.y + (t.oy || 0), ts);
           t.sc = old;
-        } else drawTile(g, t, t.x, t.y, ts);
+        } else drawTile(g, t, t.x, t.y + (t.oy || 0), ts);
       }
       // capa de burbujas (es de la casilla: no cae con los cubos)
       for (let r = 0; r < S.R; r++) for (let c = 0; c < S.C; c++) {
@@ -1643,28 +1690,74 @@ const GAME = {
       }
     };
 
-    // al ganar, los movimientos que sobran se convierten en cohetes
+    // Al ganar, como Toy Blast (WonGameHandler.GenerateAndMarkPositiveItems y CanvasManager.ConsumeRemainingMoves,
+    // grabado en el emulador): "TOY BLAST!", cada movimiento sobrante se posa en un cubo al azar y lo vuelve especial
+    // (todos TNT o todos rotores, a suertes), luego estallan uno tras otro y sale "Level Completed!" con Amy
+    let fin = null;
     P.finale = function (done) {
-      const left = Math.min(P.moves, 8);
-      if (left <= 0) { done(); return; }
       P.finaleOn = true;
-      E.floatText(E.W / 2, by + ts * 2, '¡Movimientos extra!', '#ffe14d', 46);
-      let i = 0;
-      const step = () => {
-        if (i >= left) { E.after(0.8, () => { P.finaleOn = false; done(); }); return; }
-        i++;
-        const cand = all().filter(([t]) => t.kind === 'cube');
-        if (!cand.length) { i = left; step(); return; }
-        const [t, r, c] = cand[(Math.random() * cand.length) | 0];
-        const sp = { id: uid++, kind: 'rocket', dir: Math.random() < 0.5 ? 'h' : 'v', x: t.x, y: t.y, vy: 0 };
-        S.grid[r][c] = null;
-        activate(S, sp, r, c, 0.05, K);
-        settle(S, K);
-        afterAction();
-        E.after(0.45, step);
+      const gl = !!(window.GL && GL.drawSpine) && E.gfx === 'real';
+      let ended = false;
+      const end = () => { if (ended) return; ended = true; fin = null; P.finaleOn = false; done(); };
+      P.skipFinale = end;
+      if (window.__pasada || !gl) { // sin el dibujo del original: como siempre, unos cohetes y a la ventana
+        const left = Math.min(P.moves, 8); let i = 0;
+        if (left <= 0) { end(); return; }
+        const step = () => {
+          if (ended) return;
+          if (i >= left) { E.after(0.8, end); return; }
+          i++;
+          const cand = all().filter(([t]) => t.kind === 'cube');
+          if (!cand.length) { i = left; step(); return; }
+          const [t, r, c] = cand[(Math.random() * cand.length) | 0];
+          const sp = { id: uid++, kind: 'rocket', dir: Math.random() < 0.5 ? 'h' : 'v', x: t.x, y: t.y, vy: 0 };
+          S.grid[r][c] = null; activate(S, sp, r, c, 0.05, K); settle(S, K); afterAction(); E.after(0.45, step);
+        };
+        step(); return;
+      }
+      fin = { phase: 'logo', t0: E.t, tBar: E.t, comets: [] };
+      E.sfx('win');
+      const kind = Math.random() < 0.5 ? 'bomb' : 'rocket';
+      E.after(1.9, () => { // tras el logo, los movimientos
+        if (ended) return;
+        fin.phase = 'moves'; fin.t0 = E.t;
+        const cand = all().filter(([t]) => t.kind === 'cube').sort(() => Math.random() - 0.5);
+        const n = Math.min(P.moves, cand.length), gap = n > 0 ? Math.max(0.1, Math.min(0.28, 2.5 / n)) : 0;
+        const [mx, my] = GL.movesXY();
+        for (let i = 0; i < n; i++) {
+          E.after(i * gap, () => {
+            if (ended) return;
+            const [t0, r, c] = cand[i]; const t = S.grid[r][c];
+            if (t !== t0) return;
+            P.moves = Math.max(0, P.moves - 1);
+            fin.comets.push({ x0: mx, y0: my, x1: cx(c), y1: cy(r), t0: E.t, dur: 0.35 });
+            E.after(0.35, () => {
+              if (ended || S.grid[r][c] !== t0) return;
+              const sp = kind === 'bomb' ? { id: uid++, kind: 'bomb' } : { id: uid++, kind: 'rocket', dir: Math.random() < 0.5 ? 'h' : 'v' };
+              sp.x = t0.x; sp.y = t0.y; sp.vy = 0; sp.sc = 0.4; E.tween(sp, { sc: 1 }, 0.25, { ease: E.ease.outBack });
+              S.grid[r][c] = sp; E.sfx('special');
+              if (GL.ufx) GL.ufx('SpecialItemParticles', cx(c), cy(r), ts);
+            });
+          });
+        }
+        E.after(n * gap + 0.8, boom);
+      });
+      const boom = () => { // estallan los especiales, de uno en uno
+        if (ended) return;
+        fin.phase = 'boom';
+        const next = () => {
+          if (ended) return;
+          if (hold > 0 || dying.length) { E.after(0.1, next); return; }
+          const sp = all().filter(([t]) => t.kind === 'bomb' || t.kind === 'rocket' || t.kind === 'disco');
+          if (!sp.length) { if (moving()) { E.after(0.2, next); return; } E.after(0.4, lc); return; }
+          const [t, r, c] = sp[0]; S.grid[r][c] = null; activate(S, t, r, c, 0, K); settle(S, K); afterAction();
+          E.after(0.3, next);
+        };
+        next();
       };
-      step();
+      const lc = () => { if (ended) return; fin.phase = 'lc'; fin.t0 = E.t; E.sfx('win'); E.after(3.0, end); };
     };
+    function moving() { for (const [t, r, c] of all()) if (t.delay > 0 || Math.abs(t.y - cy(r)) > 1 || t.vb) return true; return false; }
     return P;
   };
 })();

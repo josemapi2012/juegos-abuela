@@ -1,4 +1,94 @@
 'use strict';
+// Reproductor mínimo de esqueletos Spine 4.0 (formato JSON), hecho para este proyecto.
+// Soporta huesos (giro, posición, escala, cizalla), imágenes de región, cambio de imagen y color de las ranuras,
+// y animaciones por claves (lineales o escalonadas). Las mallas deformables no se dibujan.
+const SpineLite = (function () {
+  const D2R = Math.PI / 180;
+  function Skeleton(data, skinName, images) {
+    this.data = data; this.images = images;
+    this.bones = data.bones.map((b) => ({ d: b, parent: null, x: 0, y: 0, rot: 0, sx: 1, sy: 1, shx: 0, shy: 0, a: 1, b: 0, c: 0, dd: 1, wx: 0, wy: 0 }));
+    const byName = {}; this.bones.forEach((b) => { byName[b.d.name] = b; });
+    this.bones.forEach((b) => { if (b.d.parent) b.parent = byName[b.d.parent]; });
+    this.boneByName = byName;
+    // imágenes: la piel elegida encima de la de por defecto
+    this.att = {};
+    for (const sk of data.skins) if (sk.name === 'default' || sk.name === skinName) for (const [slot, atts] of Object.entries(sk.attachments || {})) {
+      this.att[slot] = Object.assign(this.att[slot] || {}, atts);
+    }
+    this.slots = data.slots.map((s) => ({ d: s, bone: byName[s.bone], att: s.attachment || null, col: hex(s.color) }));
+    this.slotByName = {}; this.slots.forEach((s) => { this.slotByName[s.d.name] = s; });
+    this.order = this.slots.slice();
+    this.setup();
+  }
+  function hex(h) { if (!h) return [1, 1, 1, 1]; return [0, 2, 4, 6].map((i) => parseInt(h.substr(i, 2) || 'ff', 16) / 255); }
+  Skeleton.prototype.setup = function () {
+    for (const b of this.bones) { const d = b.d; b.x = d.x || 0; b.y = d.y || 0; b.rot = d.rotation || 0; b.sx = d.scaleX == null ? 1 : d.scaleX; b.sy = d.scaleY == null ? 1 : d.scaleY; b.shx = d.shearX || 0; b.shy = d.shearY || 0; }
+    for (const s of this.slots) { s.att = s.d.attachment || null; s.col = hex(s.d.color); }
+  };
+  // valor de una pista en el tiempo t (claves con time; sin time = 0)
+  function sample(keys, t, fields, defs) {
+    let i = 0; while (i < keys.length - 1 && (keys[i + 1].time || 0) <= t) i++;
+    const k0 = keys[i], t0 = k0.time || 0;
+    const val = (k, f, j) => (k[f] == null ? defs[j] : k[f]);
+    if (i === keys.length - 1 || t < t0 || k0.curve === 'stepped') return fields.map((f, j) => val(k0, f, j));
+    const k1 = keys[i + 1], t1 = k1.time || 0, q = (t - t0) / Math.max(1e-6, t1 - t0);
+    return fields.map((f, j) => val(k0, f, j) + (val(k1, f, j) - val(k0, f, j)) * q);
+  }
+  Skeleton.prototype.apply = function (anim, t) {
+    const A = this.data.animations[anim]; if (!A) return;
+    this.setup();
+    for (const [bn, tl] of Object.entries(A.bones || {})) {
+      const b = this.boneByName[bn]; if (!b) continue; const d = b.d;
+      if (tl.rotate) b.rot = (d.rotation || 0) + sample(tl.rotate, t, ['value'], [0])[0];
+      if (tl.translate) { const v = sample(tl.translate, t, ['x', 'y'], [0, 0]); b.x = (d.x || 0) + v[0]; b.y = (d.y || 0) + v[1]; }
+      if (tl.scale) { const v = sample(tl.scale, t, ['x', 'y'], [1, 1]); b.sx = (d.scaleX == null ? 1 : d.scaleX) * v[0]; b.sy = (d.scaleY == null ? 1 : d.scaleY) * v[1]; }
+      if (tl.shear) { const v = sample(tl.shear, t, ['x', 'y'], [0, 0]); b.shx = (d.shearX || 0) + v[0]; b.shy = (d.shearY || 0) + v[1]; }
+    }
+    for (const [sn, tl] of Object.entries(A.slots || {})) {
+      const s = this.slotByName[sn]; if (!s) continue;
+      if (tl.attachment) { let k = null; for (const kf of tl.attachment) if ((kf.time || 0) <= t) k = kf; if (k) s.att = k.name || null; }
+      if (tl.rgba) { let i = 0; while (i < tl.rgba.length - 1 && (tl.rgba[i + 1].time || 0) <= t) i++; s.col = hex(tl.rgba[i].color); }
+    }
+  };
+  Skeleton.prototype.duration = function (anim) {
+    const A = this.data.animations[anim]; let m = 0; if (!A) return 0;
+    const scan = (o) => { if (Array.isArray(o)) o.forEach((k) => { if (k && k.time > m) m = k.time; }); else if (o && typeof o === 'object') Object.values(o).forEach(scan); };
+    scan(A); return m;
+  };
+  Skeleton.prototype.update = function () {
+    for (const b of this.bones) {
+      const ra = (b.rot + b.shx) * D2R, rb = (b.rot + 90 + b.shy) * D2R;
+      const la = Math.cos(ra) * b.sx, lb = Math.cos(rb) * b.sy, lc = Math.sin(ra) * b.sx, ld = Math.sin(rb) * b.sy;
+      const p = b.parent;
+      if (!p) { b.a = la; b.b = lb; b.c = lc; b.dd = ld; b.wx = b.x; b.wy = b.y; continue; }
+      b.a = p.a * la + p.b * lc; b.b = p.a * lb + p.b * ld; b.c = p.c * la + p.dd * lc; b.dd = p.c * lb + p.dd * ld;
+      b.wx = p.a * b.x + p.b * b.y + p.wx; b.wy = p.c * b.x + p.dd * b.y + p.wy;
+    }
+  };
+  // dibuja con el origen del esqueleto en (x,y) y la escala dada (Spine tiene el eje Y hacia arriba)
+  Skeleton.prototype.draw = function (g, x, y, scale) {
+    this.update();
+    const m0 = g.getTransform();
+    for (const s of this.order) {
+      if (!s.att) continue;
+      const at = (this.att[s.d.name] || {})[s.att]; if (!at || (at.type && at.type !== 'region')) continue;
+      const im = this.images(at.path || at.name || s.att); if (!im) continue;
+      const b = s.bone;
+      g.save();
+      g.globalAlpha = s.col[3];
+      g.setTransform(m0);
+      g.translate(x, y); g.scale(scale, -scale);
+      g.transform(b.a, b.c, b.b, b.dd, b.wx, b.wy);
+      g.translate(at.x || 0, at.y || 0); g.rotate((at.rotation || 0) * D2R); g.scale(at.scaleX == null ? 1 : at.scaleX, at.scaleY == null ? 1 : at.scaleY);
+      const w = at.width || im.width, h = at.height || im.height;
+      g.scale(1, -1);
+      g.drawImage(im, -w / 2, -h / 2, w, h);
+      g.restore();
+    }
+  };
+  return { Skeleton };
+})();
+'use strict';
 // Partes comunes del estilo 'nueva' (patio andaluz): interfaz de cerámica blanca con cenefa azul,
 // fondo de patio con macetas y mapa por un pueblo blanco. Cada juego añade sus piezas en su skins.js.
 const NUEVA = (function () {
@@ -364,7 +454,11 @@ GAME.skins = {};
   const N = [];
   for (let i = 0; i < 6; i++) N.push('c' + i, 'c' + i + 'h', 'c' + i + 'v');
   for (let k = 1; k <= 5; k++) N.push('ice' + k, 'waffle' + k, 'slock' + k);
-  N.push('cbomb', 'choc', 'lock', 'key', 'cherry', 'jelly');
+  N.push('cbomb', 'choc', 'lock', 'key', 'cherry', 'jelly', 'mixer', 'myst', 'coco', 'ufo', 'twist');
+  for (let i = 0; i < 6; i++) N.push('c' + i + 'w', 'fish' + i);
+  for (let k = 1; k <= 5; k++) N.push('skull' + k);
+  for (let k = 1; k <= 5; k++) N.push('gum' + k);
+  N.push('marm_front', 'marm_back', 'licsw');
   const fit = (name, k) => (g, w, h) => {
     const im = E.img(name); if (!im) return;
     const s = Math.min((w * k) / im.width, (h * k) / im.height);
@@ -372,17 +466,399 @@ GAME.skins = {};
   };
   const spr = (n, ts, k) => E.sprite('img' + n, ts, ts, fit(n, k));
   const Rl = (GAME.skins.real = Object.assign({}, O, { images: N, emoji: Object.assign({}, O.emoji) }));
+  Rl.scripts = ['fx.js', 'mapa.js'];
+  Rl.font = 'font.otf';
+  Rl.scripts = Rl.scripts.concat(['cut.js', 'anim.js', 'tiffi.js']);
+  Rl.popupKanim = true;
+  // tiempos medidos grabando el Candy Crush real a 60 fps (ver analisis/candycrush_motor.md):
+  // intercambio 8 fotogramas, la que avanza pasa delante un 8 % más grande; al combinar se ilumina,
+  // encoge al 30 % en ~0,15 s y estalla; la caída acelera a 53,4 casillas/s² desde parada
+  Rl.timing = { swap: 0.133, swapFront: 1.08, remove: 0.15, shrink: true, gravity: 53.4, maxFall: 24 };
+  // el envuelto "respira" como en Candy Crush (wrapped_idle_candy: 63 fotogramas a 40 por segundo)
+  Rl.tileAnim = (t) => {
+    if (t.kind !== 'candy' || t.sp !== 'w') return null;
+    const a = E.kanim('wrapped_idle_candy', (E.t + (t.id % 7) * 0.13) % (63 / 40), true);
+    return a && { sx: a.sx, sy: a.sy, ty: -a.ty };
+  };
+  const CN = ['red', 'orange', 'yellow', 'green', 'blue', 'purple'];
+  // efectos con nombre del juego original al empezar cada efecto del tablero (tools/dulces_fx.py): los de alta gama
+  // de Candy Crush, de dos tiempos en el envuelto ("first" y "second") y propios de cada combinación
+  Rl.fxStart = (f, x, y, ts, pos) => {
+    const u = ts / 80, cn = CN[f.color] || 'blue', K = (n, xx, yy, k) => E.kfx(n, xx == null ? x : xx, yy == null ? y : yy, u * (k || 1));
+    if (f.type === 'line') { const ok = E.kcut('line_' + f.dir + (f.color != null ? f.color : 4), x, y, u); K('lineblast_particles_revamp'); return ok; }
+    if (f.type === 'zap') {
+      if (f.fish) { // el pez: estela hasta su casilla y chapuzón del color
+        const [tx, ty] = pos(f.targets[0][0], f.targets[0][1]);
+        for (let i = 0; i <= 8; i++) E.after(i * 0.06, () => K('vfx_fish_swim_travel', x + ((tx - x) * i) / 8, y + ((ty - y) * i) / 8));
+        E.after(0.5, () => K('vfx_fish_swim_' + cn + '_destroy', tx, ty));
+        return true;
+      }
+      // bomba de color: se carga, cada caramelo alcanzado recibe su chispazo (el de rayado, envuelto o pez si se
+      // convierten) y al final estalla
+      K('vfx_colorbomb_charge'); K('SwitcherExplodeColorBomb');
+      const hit = 'vfx_colorbomb_target_hit' + (f.hit ? '_' + f.hit : '');
+      f.targets.forEach(([r, c], i) => { const [tx, ty] = pos(r, c); E.after(0.08 + i * 0.012, () => K(hit, tx, ty)); });
+      E.after(0.45 + f.targets.length * 0.02, () => K('vfx_colorbomb_explosion'));
+      return true;
+    }
+    if (f.type === 'ufo') { f.targets.forEach(([r, c], i) => { const [tx, ty] = pos(r, c); E.after(0.45 + i * 0.12, () => { K('UfoBlast', tx, ty); E.sfx('ufoShot'); }); }); E.sfx('ufoUp'); return true; }
+    if (f.type === 'roll') { E.sfx('cocoRoll'); for (let k = 1; k <= f.n; k++) { const [tx, ty] = pos(f.r + f.dr * k, f.c + f.dc * k); E.after(0.2 * k, () => K('CoconutWheelExplode', tx, ty)); } return true; }
+    if (f.type === 'boom') {
+      if (f.combo === 'cake') { const [cx2, cy2] = pos(f.r + 0.5, f.c + 0.5); K('SwitcherClearCakeBombPlate', cx2, cy2, 1.5); E.after(0.15, () => K('effect_color_bomb_combo_nuke', cx2, cy2, 1.6)); E.sfx('bomb'); E.shake(0.6); return true; }
+      if (f.combo === 'bb') { K('effect_color_bomb_combo_nuke_first_hit'); E.after(0.2, () => K('effect_color_bomb_combo_nuke', null, null, 1.6)); return true; }
+      if (f.combo === 'ww') { K('vfx_wrapped_candy_combo_explosion_revamp_first'); E.after(0.25, () => K('vfx_wrapped_candy_combo_explosion_revamp_second')); return true; }
+      if (f.combo === 'sw') { K('vfx_line_wrapped_candy_combo_explosion_01'); K('vfx_line_wrapped_candy_combo_horizontal_01'); return true; }
+      K('vfx_wrapped_candy_revamp_first_' + cn); E.after(0.18, () => K('vfx_wrapped_candy_revamp_second_' + cn));
+      return true;
+    }
+    return false;
+  };
+  // exclamaciones: tres capas de texto con los colores de Candy Crush y su línea de tiempo (t_exclamation_*)
+  const EXC = {
+    2: { t: '¡Dulce!', l: [['#461700', 10], ['#702501', 7]], top: ['#ffd053', '#e09421', '#fbeba4'] },
+    3: { t: '¡Sabroso!', l: [['#c36f46', 10], ['#ba5828', 7]], top: ['#fff1cd', '#d88405', '#fbeba4'] },
+    4: { t: '¡Delicioso!', l: [['#5a1a6a', 10], ['#8a2a9a', 7]], top: ['#ffffff', '#ff9ad8', '#faeaa2'] },
+    5: { t: '¡Divino!', l: [['#0a3a7a', 10], ['#1a5aba', 7]], top: ['#ffffff', '#8ad8ff', '#faeaa2'] },
+    9: { t: '¡Sugar Crush!', l: [['#5a0a3a', 12], ['#a01a6a', 8]], top: ['#ffffff', '#ff6ab8', '#ffe0f0'] },
+  };
+  const lerpKeys = (keys, t) => { if (t <= keys[0][0]) return keys[0][1]; for (let i = 1; i < keys.length; i++) if (t <= keys[i][0]) { const [a, va] = keys[i - 1], [b, vb] = keys[i]; return va + (vb - va) * (t - a) / (b - a); } return keys[keys.length - 1][1]; };
+  const SCALE = [[0, 0.8], [0.333, 0.8], [0.533, 1.1], [1.133, 0.98], [1.25, 1]];
+  const MOVE = [[0, 50], [1.333, 7], [1.983, -56]];
+  const excCache = {};
+  const excImg = (word, e) => {
+    if (excCache[word]) return excCache[word];
+    const size = 78, c = document.createElement('canvas'), g0 = c.getContext('2d');
+    g0.font = E.font(size); const w = g0.measureText(e.t).width + 80, h = size * 1.9;
+    c.width = Math.ceil(w); c.height = Math.ceil(h);
+    const g = c.getContext('2d'); g.translate(c.width / 2, c.height / 2);
+    g.font = E.font(size); g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
+    for (const [col, o] of e.l) { g.lineWidth = o * 2.2; g.strokeStyle = col; g.strokeText(e.t, 0, 0); g.fillStyle = col; g.fillText(e.t, 0, 0); }
+    const gr = g.createLinearGradient(0, -size * 0.45, 0, size * 0.45); gr.addColorStop(0, e.top[0]); gr.addColorStop(1, e.top[1]);
+    g.lineWidth = 3; g.strokeStyle = e.top[2]; g.strokeText(e.t, 0, 0); g.fillStyle = gr; g.fillText(e.t, 0, 0);
+    if (document.fonts && !document.fonts.check(E.font(size))) return c; // sin la fuente aún: no se guarda
+    return (excCache[word] = c);
+  };
+  Rl.exclaim = (g, word, x, y, t) => {
+    const e = EXC[word]; if (!e) return true;
+    if (t > 1.4) return true; // más breve: no se queda tapando el juego
+    const sc = lerpKeys(SCALE, t) * 1.0, dy = (50 - lerpKeys(MOVE, t)) * 1.2;
+    const a = t < 0.25 ? t / 0.25 : t > 1.1 ? Math.max(0, 1 - (t - 1.1) / 0.3) : 1;
+    // el letrero se dibuja una vez en una imagen (sus contornos gruesos de texto en cada fotograma daban tirones en la tablet)
+    const im = excImg(word, e); if (!im) return true;
+    g.save(); g.globalAlpha = a; g.translate(x, y + dy * 0.4); g.scale(sc * 0.7, sc * 0.7); // más pequeña y casi sin desplazarse
+    g.drawImage(im, -im.width / 2, -im.height / 2);
+    g.restore();
+    return false;
+  };
+  // sonidos, voces y música de Candy Crush
+  const v = (n, k) => Array.from({ length: k }, (_, i) => n + (i + 1));
+  Rl.sfx = {
+    swap: v('candy_switch_', 3), bad: ['candy_switch_fail'], land: v('candy_land_', 4),
+    pop: (p) => ['candy_match_' + Math.max(1, Math.min(5, Math.round((p - 1) / 0.12) + 1))],
+    special: v('candy_special_create_a', 3), rocket: v('lineblast_', 3), bomb: ['general_explosion_rustlingpaper_1', 'general_explosion_rustlingpaper_2'],
+    magic: v('colorbomb_target_hit_', 4), collect: v('general_impact_paper_soft_', 4), star: ['reward_star'], rescue: ['collect_ingredient_start'],
+    win: ['music_stinger_jingle_win'], lose: ['music_stinger_jingle_lose'], click: ['button_press'], shuffle: ['shuffling_in'],
+    vo2: ['sweet'], vo3: ['tasty'], vo4: ['delicious'], vo5: ['divine'], sugarcrush: ['sugar_crush'],
+  };  Object.assign(Rl.sfx, { popIn: ['inventory_popup_in'], popOut: ['inventory_popup_out'] }); // ventanas de Candy Crush
+  Object.assign(Rl.sfx, { celebrate: ['celebration'], confetti: ['els_confetti'], cbCharge: ['colorbomb_charge'], cbEnd: ['colorbomb_end'], cbMade: ['colour_bomb_created'], barStar1: ['progress_bar_revamp_star_1'], barStar2: ['progress_bar_revamp_star_2'], barStar3: ['progress_bar_revamp_star_3'], fishMade: ['swimming_fish_enter'], fishSwim: ['swimming_fish_loop'], hammerCharge: ['booster_lollypophammer_charge'], cocoRoll: ['coconut_wheel_activate'], ufoUp: ['ufo_lift_off'], ufoShot: ['ufo_lazer'], hammerHit: ['booster_lollypophammer_impact'], brushUse: ['striped_brush_activate'], handUse: ['booster_freeswitch_use'], fishHit: ['swimming_fish_hit_1', 'swimming_fish_hit_2', 'swimming_fish_hit_3', 'swimming_fish_hit_4', 'swimming_fish_hit_5'] }); // final, bomba de color y estrellas de la barra (WebGL)
+
+  Rl.music = { game: 'music_gameplay_swimming_with_the_fishes', map: 'music_menumap_lollipop_meadow_road_trip' };
+  // interfaz con las piezas originales de Candy Crush (muchas son blancas o rosas y el juego las tiñe)
+  Rl.images = Rl.images.concat(['ui_goals_panel', 'ui_moves_tab', 'ui_booster_amount_panel', 'ui_bar_bg', 'ui_booster_button_blue', 'ui_booster_lollipop', 'ui_booster_strippedbrush',
+    'ui_booster_colorbomb', 'ui_booster_freeswitch', 'ui_booster_shuffle', 'ui_settings_button_menu', 'ui_btn_pink', 'ui_btn_green', 'ui_btn_blue', 'ui_btn_purple', 'ui_btn_red',
+    'ui_pnl_pink_base', 'ui_popup_standard_frame', 'ui_cell'], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((i) => 'bg' + i + '.jpg'));
+  Rl.theme = Object.assign({}, O.theme, { accent: '#e8459a', ribbon: '#c2387e', hudText: '#7a2a6a', hudLabel: '#ffffff', movesColor: '#ffffff', movesStroke: '#5a1f7a', pauseColor: '#ff5fa8', popText: '#ffffff' });
+  const world = (n) => (Math.floor(((n || 1) - 1) / 20) % 10) + 1;
+  Rl.bgKey = (n) => 'w' + world(n);
+  Rl.bgImage = (n) => E.img('bg' + world(n) + '.jpg'); // para el fondo WebGL (Dulces HD)
+  Rl.playBg = (g, w, h) => { // fondo difuminado del mundo, cubriendo la pantalla
+    const im = E.img('bg' + world(E.play.n) + '.jpg'); if (!im) return O.playBg(g, w, h);
+    const s = Math.max(w / im.width, h / im.height); g.drawImage(im, (w - im.width * s) / 2, (h - im.height * s) / 2, im.width * s, im.height * s);
+  };
+  Rl.board = (g, S, bx, by, ts, inB) => {
+    const cell = E.img('ui_cell');
+    g.save(); g.globalAlpha = 0.88;
+    for (let r = 0; r < S.R; r++) for (let c = 0; c < S.C; c++) if (inB(r, c)) { if (cell) g.drawImage(cell, bx + c * ts - 0.5, by + r * ts - 0.5, ts + 1, ts + 1); else { g.fillStyle = 'rgba(40,70,130,0.8)'; g.fillRect(bx + c * ts, by + r * ts, ts, ts); } }
+    g.restore();
+  };
+  Rl.hud = (g, W, H) => {
+    E.nine(g, E.tinted('ui_pnl_pink_base', '#8a3fc0'), 4, -30, W - 8, H + 22, 40, 30);
+    g.save(); g.globalAlpha = 0.18; g.strokeStyle = '#ffffff'; g.lineWidth = 14;
+    g.beginPath(); for (let x = -H; x < W; x += 46) { g.moveTo(x, H); g.lineTo(x + H, 0); } g.stroke(); g.restore();
+    const box = (x, w) => E.nine(g, E.tinted('ui_goals_panel', '#5a1f7a'), x, 46, w, H - 62, 30, 22);
+    box(16, 312); box(W - 178, 162);
+    const ax = W / 2 + 40, ay = H / 2 - 4, im = E.img('ui_booster_amount_panel');
+    if (im) g.drawImage(im, ax - 56, ay - 56, 112, 112);
+  };
+  // cabecera como la de Candy Crush: franja morada con rayas, movimientos grandes, barra de estrellas,
+  // caja oscura con los objetivos y el retrato a la derecha
+  // Tiffi animada (esqueleto Spine del juego): parada, contenta con los combos, baila al ganar y se pone triste al perder
+  let tiffi = null, tAnim = 'idle_main', tT = 0, tLast = 0, tNext = null;
+  Rl.tiffiMood = (m) => { tNext = m; };
+  function tiffiDraw(g, x, y, sc) {
+    if (!window.SPINE_TIFFI || typeof SpineLite === 'undefined') return false;
+    if (!tiffi) tiffi = new SpineLite.Skeleton(window.SPINE_TIFFI, 'Tiffi_Regular', (n) => E.imgL('tiffi/' + n.split('/').pop()));
+    const now = E.t, dt = Math.min(0.1, now - tLast); tLast = now; tT += dt;
+    const dur = tiffi.duration(tAnim) || 1;
+    if (tNext) { tAnim = tNext; tNext = null; tT = 0; }
+    else if (tT > dur) { tT = 0; if (!/loop/.test(tAnim)) tAnim = ['idle_main', 'idle_main', 'idle', 'idle02', 'idle03'][(Math.random() * 5) | 0]; }
+    tiffi.apply(tAnim, tT);
+    tiffi.draw(g, x, y + 56, sc);
+    return true;
+  }
+  Rl.hudAll = (g, W, H, h) => {
+    const P = h.P;
+    // paleta: rosa en los niveles normales y morada en los difíciles (como Candy Crush)
+    const hard = E.isHard(h.n);
+    const C = hard ? { panel: '#8b3bc4', text: '#4a1670', label: '#f3d6ff', moves: '#ffffff', goal: '#3a1250', goalText: '#2a0a3a', bar: '#3a1250', barOn: '#ff7ad0', star: '#9a6ac0' }
+      : { panel: '#ffb3d1', text: '#c2185b', label: '#b0306a', moves: '#ff4f9a', goal: '#fbe7ea', goalText: '#5a1a3a', bar: '#6e2448', barOn: '#ff8ac0', star: '#f39ac3' };
+    E.nine(g, E.tinted('ui_pnl_pink_base', C.panel), -20, -40, W + 40, H + 30, 40, 34);
+    g.save(); E.rr(g, -20, -40, W + 40, H + 30, 34); g.clip();
+    g.globalAlpha = 0.16; g.strokeStyle = '#ffffff'; g.lineWidth = 16;
+    g.beginPath(); for (let x = -H; x < W + H; x += 44) { g.moveTo(x, H); g.lineTo(x + H, -10); } g.stroke(); g.restore();
+    // nivel y movimientos
+    E.text(g, 'Nivel ' + (h.n > 8000 ? '★' : h.n), 92, 24, 22, hard ? '#ffffff' : C.text, { stroke: hard ? C.text : '#ffffff', sw: 5 });
+    if (h.timeTotal) {
+      const t = Math.max(0, Math.ceil(h.timeLeft())); const low = t <= 10;
+      E.text(g, Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'), 92, 80, low ? 54 + Math.sin(E.t * 8) * 4 : 54, low ? '#ff6060' : C.moves, { stroke: hard ? C.text : '#ffffff', sw: 7 });
+      E.text(g, 'tiempo', 92, 120, 20, C.label, { stroke: false });
+    } else {
+      const low = P.moves <= 5;
+      E.text(g, P.moves === Infinity ? '∞' : String(Math.max(0, P.moves)), 92, 78, low ? 66 + Math.sin(E.t * 8) * 4 : 66, low ? '#ff6060' : C.moves, { stroke: hard ? C.text : '#ffffff', sw: 8 });
+      E.text(g, 'movimientos', 92, 120, 20, C.label, { stroke: false });
+    }
+    // caja de objetivos
+    const gx = 182, gw = W - 182 - 150, gy = 46, gh = H - 62;
+    if (hard) E.nine(g, E.tinted('ui_goals_panel', C.goal), gx, gy, gw, gh, 30, 22); else { E.rr(g, gx, gy, gw, gh, 16); g.fillStyle = C.goal; g.fill(); g.lineWidth = 2; g.strokeStyle = 'rgba(194,24,91,0.15)'; g.stroke(); }
+    const n = h.goals.length, cw = gw / Math.max(1, n), sz = Math.min(cw * 0.5, gh * 0.62, 58);
+    let done = 0, total = 0;
+    h.goals.forEach((gl, i) => {
+      total += gl.count; done += gl.count - Math.max(0, gl.left);
+      const cx = gx + cw * i + cw * 0.38, cy = gy + gh / 2;
+      gl.pos = { x: cx, y: cy };
+      GAME.drawGoalIcon(g, gl, cx, cy, sz * (1 + (gl.bump || 0) * 0.3));
+      if (gl.left <= 0) { const ck = E.img('ui_check'); g.beginPath(); g.arc(cx + sz * 0.6, cy + sz * 0.2, sz * 0.3, 0, 7); g.fillStyle = '#3cb93c'; g.fill(); E.text(g, '✓', cx + sz * 0.6, cy + sz * 0.22, sz * 0.4, '#fff', { stroke: false }); }
+      else E.text(g, String(gl.left), cx + sz * 0.72, cy + sz * 0.05, Math.max(22, sz * 0.5), hard ? '#ffffff' : C.goalText, { stroke: hard ? C.goalText : '#ffffff', sw: 5 });
+    });
+    // barra de estrellas (avance de los objetivos)
+    const bx = gx + 14, bw = gw - 28, by2 = 20, k = total ? Math.min(1, done / total) : 0;
+    E.rr(g, bx, by2 - 7, bw, 14, 7); g.fillStyle = C.bar; g.fill();
+    if (k > 0) { E.rr(g, bx, by2 - 7, Math.max(14, bw * k), 14, 7); g.fillStyle = C.barOn; g.fill(); }
+    [0.4, 0.7, 1].forEach((v) => E.star(g, bx + bw * v - (v === 1 ? 8 : 0), by2, 13, k >= v ? '#ffd23f' : C.star, C.bar));
+    // retrato (al tocarlo explica la pieza que toques después)
+    const ax = W - 76, ay = H / 2 - 6, ring = E.img('ui_booster_amount_panel');
+    if (h.askOn) { g.beginPath(); g.arc(ax, ay, 62, 0, 7); g.fillStyle = 'rgba(255,210,80,0.6)'; g.fill(); }
+    if (!tiffiDraw(g, ax, ay, 0.36)) { if (ring) g.drawImage(ring, ax - 58, ay - 58, 116, 116); E.emoji(g, GAME.theme.mascot, ax, ay - 4, 72); }
+    g.beginPath(); g.arc(ax + 36, ay + 34, 17, 0, 7); g.fillStyle = '#3f8fd9'; g.fill(); g.lineWidth = 3; g.strokeStyle = '#fff'; g.stroke();
+    E.text(g, '?', ax + 36, ay + 35, 23, '#fff', { stroke: false });
+    h.ask(ax - 58, ay - 58, 116, 116);
+  };
+  // ---- mapa: tierra verde con la carretera rosa, decoraciones de cada mundo de Candy Crush y discos rosas
+  const decos = (w) => { const L = window.MAPA_DECOS || {}, keys = Object.keys(L); return keys.length ? L[keys[w % keys.length]] : []; };
+  Rl.mapNoDecor = true;
+  Rl.mapBg = (g, top, zoneH) => {
+    const z0 = Math.floor(top / zoneH);
+    for (let z = z0 - 1; z <= z0 + 1; z++) {
+      const zy = -z * zoneH - zoneH + top + E.H;
+      const gr = g.createLinearGradient(0, zy, 0, zy + zoneH); gr.addColorStop(0, '#9fe0b0'); gr.addColorStop(1, '#6cc68a');
+      g.fillStyle = gr; g.fillRect(0, zy, E.W, zoneH + 1);
+    }
+    const step = 150, i0 = Math.floor(top / step) - 1;
+    for (let i = i0; i <= i0 + Math.ceil(E.H / step) + 2; i++) {
+      const y = -i * step + top + E.H, w = Math.max(0, Math.floor((i * step) / zoneH)), L = decos(w);
+      if (!L.length) continue;
+      const r = E.rng(i * 7919 + 3), left = ((i % 2) + 2) % 2 === 0;
+      const nm = L[Math.floor(r() * L.length)], im = E.imgL(nm); if (!im) continue;
+      const big = nm.includes('_l_') ? 230 : nm.includes('_m_') ? 170 : 120, s = Math.min(big / im.width, big / im.height);
+      const x = left ? 8 + r() * 30 : E.W - 8 - im.width * s - r() * 30;
+      g.drawImage(im, x, y - im.height * s, im.width * s, im.height * s);
+    }
+  };
+  Rl.mapPath = (g, a, b, pos) => {
+    g.save(); g.lineCap = 'round'; g.lineJoin = 'round';
+    g.beginPath(); for (let i = a; i <= b; i++) { const p = pos(i); if (i === a) g.moveTo(p.x, p.y); else g.lineTo(p.x, p.y); }
+    g.lineWidth = 150; g.strokeStyle = '#f7c1d9'; g.stroke();
+    g.lineWidth = 132; g.strokeStyle = '#fbd3e6'; g.stroke();
+    g.lineWidth = 14; g.strokeStyle = '#ffffff'; g.stroke();
+    g.setLineDash([18, 18]); g.lineWidth = 14; g.strokeStyle = '#ff6fa8'; g.stroke(); g.setLineDash([]);
+    g.restore();
+  };
+  Rl.mapNode = (g, i, x, y, r, cur, done, hd, stars) => {
+    const base = hd === 2 ? '#6a2aa0' : hd === 1 ? '#a03ad0' : cur ? '#ff3f8f' : done ? '#ff5fa0' : '#f7a8c8';
+    g.beginPath(); g.ellipse(x, y + r * 0.55, r * 1.05, r * 0.5, 0, 0, 7); g.fillStyle = 'rgba(160,60,100,0.35)'; g.fill();
+    if (cur) { g.beginPath(); g.arc(x, y, r + 12 + Math.sin(E.t * 4) * 3, 0, 7); g.fillStyle = 'rgba(255,255,255,0.55)'; g.fill(); }
+    g.beginPath(); g.arc(x, y, r, 0, 7); g.fillStyle = '#ffffff'; g.fill();
+    g.beginPath(); g.arc(x, y - 1, r - 4, 0, 7);
+    const gr = g.createRadialGradient(x - r * 0.3, y - r * 0.4, r * 0.1, x, y, r); gr.addColorStop(0, E.shade(base, 0.4)); gr.addColorStop(1, base); g.fillStyle = gr; g.fill();
+    E.text(g, String(i), x, y + 1, i > 999 ? 22 : 28, '#ffffff', { stroke: E.shade(base, -0.5), sw: 5 });
+    if (hd && !done) E.emoji(g, '💀', x, y - r - 12, 30);
+    if (done) for (let s2 = 0; s2 < 3; s2++) E.star(g, x + (s2 - 1) * 22, y + r + 6 + (s2 === 1 ? 4 : 0), 11, s2 < stars ? '#ffd23f' : '#e8c8d8', '#a0607a');
+    if (cur) { const ti = E.imgL('map_tiffi'); if (ti) { const s = 120 / ti.height; g.drawImage(ti, x - r - ti.width * s + 6, y - 100, ti.width * s, ti.height * s); } else E.emoji(g, GAME.theme.mascot, x - r - 26, y - 6, 54); }
+  };
+  Rl.mapHeader = (g, W, H) => {
+    const gr = g.createLinearGradient(0, 0, 0, H); gr.addColorStop(0, '#ffffff'); gr.addColorStop(1, '#ffd6ea');
+    g.fillStyle = gr; g.fillRect(0, 0, W, H); g.fillStyle = '#ff9cc8'; g.fillRect(0, H - 4, W, 4);
+  };
+  Rl.bar = (g, y, W, H) => {
+    if (E.isHard(E.play.n)) E.nine(g, E.tinted('ui_goals_panel', '#6a2a9a'), 96, y + 10, W - 104, H - 20, 30, 40);
+    else { E.rr(g, 96, y + 10, W - 104, H - 20, 40); g.fillStyle = '#fde3ec'; g.fill(); g.lineWidth = 3; g.strokeStyle = '#f5b8cf'; g.stroke(); }
+  };
+  Rl.pauseIcon = (g, x, y, w, h) => { const im = E.img('ui_settings_button_menu'); if (im) g.drawImage(im, x - w * 0.05, y - h * 0.05, w * 1.1, h * 1.1); };
+  // ventanas como las de Candy Crush: marco morado de rayas, cinta rosa del título y caja oscura de objetivos
+  Rl.ribbon = (g, x, y, w, h) => { const im = E.img('ui_btn_pink'); if (im) E.nine(g, im, x + 20, y + 8, w - 40, h - 16, im.width / 2 - 1, (h - 16) / 2); };
+  Rl.goalBox = (g, x, y, w, h) => { if (E.popup && E.popup.hard) E.nine(g, E.tinted('ui_goals_panel', '#3a1250'), x, y, w, h, 30, 26); else { E.rr(g, x, y, w, h, 20); g.fillStyle = 'rgba(255,255,255,0.55)'; g.fill(); } };
+  const DARK = { ui_btn_pink: '#a0105a', ui_btn_green: '#1a6a1a', ui_btn_red: '#8a1010', ui_btn_purple: '#4a1070', ui_btn_blue: '#103a8a' };
+  const BTN = { '#3cb93c': 'ui_btn_pink', '#e8453c': 'ui_btn_red', '#e8459a': 'ui_btn_pink', '#8a5cd6': 'ui_btn_purple', '#ff8a1f': 'ui_btn_pink', '#ff5fa8': null };
+  Rl.btnStroke = (color) => DARK[BTN[color] || 'ui_btn_blue'] || '#103a8a';
+  Rl.button = (g, x, y, w, h, color, down, r) => {
+    const oy = down ? 4 : 0, round = Math.abs(w - h) < 4 || (w <= 120 && h <= 100);
+    if (round && color === '#ff5fa8') return; // el botón de pausa ya es una imagen
+    const name = round && w < 130 && !BTN[color] ? 'ui_booster_button_blue' : BTN[color] || (color === '#9aa3ad' || color === '#8a96a3' || color === '#b9c0c8' ? 'ui_btn_blue' : 'ui_btn_blue');
+    let im = E.img(name); if (!im) return O.button(g, x, y, w, h, color, down, r);
+    if (color === '#9aa3ad' || color === '#8a96a3' || color === '#b9c0c8') im = E.tinted(name, '#c8c8d0');
+    if (round) { const d = Math.min(w, h) * (down ? 0.87 : 1); g.drawImage(im, x + (w - d) / 2, y + (h - d) / 2, d, d); }
+    else E.nine(g, im, x, y + oy, w, h - 4, im.width / 2 - 1, Math.min((h - 4) / 2, 60));
+  };
+  const BICON = { hammer: 'ui_booster_lollipop', row: 'ui_booster_strippedbrush', rainbow: 'ui_booster_colorbomb', switch: 'ui_booster_freeswitch', shuffle: 'ui_booster_shuffle' };
+  Rl.boosterIcon = (g, b, x, y, w, h, have) => {
+    const im = E.img(BICON[b.id]);
+    if (im) { const s = w * 0.78; g.drawImage(im, x + (w - s) / 2, y + (h - s) / 2 - 2, s, s); } else E.emoji(g, b.icon, x + w / 2, y + h / 2, w * 0.6);
+    const ap = E.img('ui_booster_amount_panel'), tx = x + w - 14, ty = y + h - 12;
+    if (ap) g.drawImage(ap, tx - 17, ty - 17, 34, 34);
+    E.text(g, have === Infinity ? '∞' : have > 0 ? String(have) : '+', tx, ty + 1, 20, '#7a2a1a', { stroke: false });
+  };
+  Rl.panel = (g, x, y, w, h, opt) => {
+    // marco de rayas rosa con interior claro; en los niveles difíciles, morado con interior oscuro (como Candy Crush)
+    const hard = !!(E.popup && E.popup.hard);
+    const im = hard ? E.tinted('ui_popup_standard_frame', '#c27af0') : E.img('ui_popup_standard_frame'); if (!im) return O.panel(g, x, y, w, h, opt);
+    E.nine(g, im, x, y, w, h, 40, 36);
+    E.rr(g, x + 22, y + 22, w - 44, h - 44, 22); g.fillStyle = hard ? '#7a2fb0' : '#ffe6ee'; g.fill();
+    GAME.theme.popText = hard ? '#ffffff' : '#8a2a5a';
+  };
+  // colores de los caramelos de Candy Crush para teñir los efectos (rojo, naranja, amarillo, verde, azul, morado)
+  const TINT = [[255, 60, 60], [255, 150, 30], [255, 225, 40], [80, 220, 60], [40, 150, 255], [190, 80, 255]];
+  Rl.fxEvent = (name, x, y, ts, color) => E.kfx(name, x, y, ts / 80, color != null ? TINT[color] : null);
   Rl.tile = function (t, ts, COLORS) {
     const hp = (v) => Math.max(1, Math.min(5, v));
-    if (t.kind === 'candy' && t.sp !== 'w' && t.sp !== 'f') return spr('c' + t.color + (t.sp || ''), ts, 0.9);
+    if (t.kind === 'candy' && t.myst && !t.sp) return spr('myst' + t.color, ts, 0.9);
+    if (t.kind === 'candy' && t.timer > 0 && !t.sp) return spr('pep' + t.color, ts, 0.95);
+    if (t.kind === 'candy' && t.sp === 'f') return spr('fish' + t.color, ts, 0.92);
+    if (t.kind === 'candy' && t.sp === 'w') return spr('c' + t.color + 'w', ts, 1.0);
+    if (t.kind === 'candy') return spr('c' + t.color + (t.sp || ''), ts, 0.9);
+    if (t.kind === 'mixer') return spr('mixer', ts, 1.0);
+    if (t.kind === 'skull') return spr('skull' + hp(t.vhp != null ? t.vhp : t.hp), ts, 1.0);
+    if (t.kind === 'shell') return spr('shell', ts, 0.95);
+    if (t.kind === 'cobra') return spr('cobra', ts, 0.95);
+    if (t.kind === 'twist') return spr('twist', ts, 1.0); // cordón de colores (chain_layer1_c)
+    if (t.kind === 'ing') return spr(t.ing === 1 ? 'hazel' : 'cherry', ts, 0.95);
     if (t.kind === 'bomb') return spr('cbomb', ts, 0.92);
+    if (t.kind === 'coco') return spr('coco', ts, 0.9);
+    if (t.kind === 'ufo') return spr('ufo', ts, 0.95);
+    if (t.kind === 'ice' && t.gum) return spr('gum' + hp(t.vhp != null ? t.vhp : t.hp), ts, 0.98);
+    if (t.kind === 'lic') return spr('licsw', ts, 0.95);
     if (t.kind === 'ice') { const v = hp(t.vhp != null ? t.vhp : t.hp); if (t.choc) return spr('choc', ts, 0.98); return spr((t.waffle ? 'waffle' : 'ice') + v, ts, 0.98); }
     if (t.kind === 'slock') return spr('slock' + hp(t.vhp != null ? t.vhp : t.hp), ts, 0.98);
     return O.tile(t, ts, COLORS);
   };
   Rl.jelly = (g, w, h, level) => { g.globalAlpha = level >= 2 ? 1 : 0.65; fit('jelly', 1.04)(g, w, h); g.globalAlpha = 1; };
   Rl.lock = fit('lock', 1.0);
-  Object.assign(Rl.emoji, { '🌈': fit('cbomb', 0.95), '🔑': fit('key', 0.95), '🍒': fit('cherry', 0.95), '〰️': fit('c4h', 0.95) });
+  // mermelada como en marmalade_lock_scene: fondo amarillo translúcido y encima el brillo
+  Rl.marm = (g, w, h) => { g.globalAlpha = 0.4; fit('marm_back', 1.0)(g, w, h); g.globalAlpha = 1; fit('marm_front', 1.0)(g, w, h); };
+  Rl.mystImg = true;
+  // máquina de chicles de Candy Crush (gumball_scene.xml) vaciándose, y el chicle del pedido
+  Rl.images.push('gumm0', 'gumm6', 'gumm12', 'gumm17', 'gumm22', 'gumball');
+  Rl.gumballMachine = (g, w, h, q) => fit('gumm' + [0, 6, 12, 17, 22][q], 1.05)(g, w, h);
+  Rl.gumballIcon = fit('gumball', 0.9);
+  // piezas que el Candy Crush actual ya no trae, con sus imágenes del APK 1.119 (2018)
+  Rl.images.push('hazel', 'plus5', 'clock', 'hud_hazel', 'order_myst', 'order_bomb');
+  // portal y flecha de salida de ingredientes de Candy Crush
+  Rl.images.push('portal', 'exit');
+  Rl.wheel = { colors: ['#ff3b3b', '#ff9a1e', '#ffd21e', '#4cd137', '#2e9bff', '#b35cff'], rim: '#e8459a', hub: '#ffffff', arrowColor: '#e8459a' }; // ruleta con los colores de los caramelos
+  for (const k of ['lic', 'fish', 'stripe', 'timer', 'ing']) Rl.images.push('cannon_' + k);
+  Rl.cannonImg = (kind) => E.img('cannon_' + kind);
+  Object.defineProperty(Rl, 'portal', { get: () => E.img('portal') });
+  // portal de la gama alta de Candy Crush (regular_portal): túnel ovalado con la tira portal_hole puesta en redondo,
+  // brillo cálido aditivo (soft_glow con su color 255,222,163) y destellos que giran por el borde
+  Rl.images.push('pt_portal_hole', 'pt_portal_twinkles', 'pt_soft_glow');
+  let ptHole = null;
+  const holeImg = () => {
+    if (ptHole) return ptHole; const t = E.img('pt_portal_hole'); if (!t) return null;
+    const tc = document.createElement('canvas'); tc.width = t.width; tc.height = t.height; const tg = tc.getContext('2d'); tg.drawImage(t, 0, 0);
+    let src; try { src = tg.getImageData(0, 0, t.width, t.height).data; } catch (e) { return null; } // imagen sin permiso de lectura: el portal sencillo
+    const S = 128, c = document.createElement('canvas'); c.width = S; c.height = S;
+    const g = c.getContext('2d'), out = g.createImageData(S, S), mx = Math.floor(t.width / 2);
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      const rr = Math.hypot(x - S / 2 + 0.5, y - S / 2 + 0.5) / (S / 2); if (rr > 1) continue;
+      const row = Math.min(t.height - 1, Math.floor(rr * t.height)), i = (row * t.width + mx) * 4, o = (y * S + x) * 4;
+      out.data[o] = src[i]; out.data[o + 1] = src[i + 1]; out.data[o + 2] = src[i + 2]; out.data[o + 3] = src[i + 3] * Math.min(1, (1 - rr) * 8);
+    }
+    g.putImageData(out, 0, 0); return (ptHole = c);
+  };
+  Rl.portalDraw = (g, x, y, ts) => {
+    const hole = holeImg(), glow = E.tinted('pt_soft_glow', '#ffdea3'), tw = E.img('pt_portal_twinkles'); if (!hole) return false;
+    const w = ts * 0.96, h = ts * 0.28;
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    if (glow) { g.globalAlpha = 0.8; g.drawImage(glow, x - w * 0.85, y - h * 0.9, w * 1.7, h * 1.8); }
+    g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
+    g.drawImage(hole, x - w / 2, y - h / 2, w, h);
+    if (tw) {
+      g.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 3; i++) { const a = E.t * 1.6 + i * 2.09, s = ts * 0.2 * (0.6 + 0.4 * Math.sin(E.t * 5 + i * 1.7)); g.globalAlpha = 0.85; g.drawImage(tw, x + Math.cos(a) * w * 0.45 - s / 2, y + Math.sin(a) * h * 0.45 - s / 2, s, s); }
+    }
+    g.restore();
+    return true;
+  };
+  Object.defineProperty(Rl, 'ingExit', { get: () => E.img('exit') });
+  for (let i = 0; i < 6; i++) Rl.images.push('myst' + i, 'pep' + i);
+  Rl.candyMarks = (g, t, s, COLORS) => {
+    if (t.timer > 0) { // número en la esfera de la bomba
+      const red = t.timer <= 3;
+      E.text(g, String(t.timer), -s * 0.12, s * 0.12, s * 0.3, red ? '#d62828' : '#333', { stroke: false });
+    }
+    if (t.cham != null) { // camaleón: el caramelo partido en dos, el otro lado es el color al que cambiará
+      const im = E.img('c' + t.cham); const h = (Math.sin(E.t * 2.5) + 1) / 2;
+      if (im) { g.save(); g.beginPath(); g.moveTo(s, -s); g.lineTo(s, s); g.lineTo(-s, s); g.closePath(); g.clip(); g.globalAlpha *= 0.75 + h * 0.25; const k = s * 0.9; g.drawImage(im, -k / 2, -k / 2, k, k); g.restore(); }
+    }
+    if (t.myst && t.sp) { const mi = E.img('myst' + t.color); if (mi) g.drawImage(mi, -s * 0.3, -s * 0.3, s * 0.6, s * 0.6); }
+    if (t.plus5) { // flechas de movimientos y "+5" con el estilo del "+3" del juego
+      const im = E.img('plus5');
+      if (im) { const w = im.width * 0.55, h = im.height * 0.48; g.drawImage(im, im.width - w, im.height - h, w, h, -s * 0.05, s * 0.02, s * 0.45, s * 0.45 * h / w); }
+      E.text(g, '+5', -s * 0.08, -s * 0.12, s * 0.36, '#fff', { stroke: '#8a1a2a', sw: s * 0.07 });
+    }
+    if (t.clock) { const im = E.img('clock'); if (im) g.drawImage(im, -s * 0.05, -s * 0.05, s * 0.5, s * 0.5); }
+    return true;
+  };
+  Object.assign(Rl.emoji, { '🌰': fit('hud_hazel', 0.95) });
+  // capa de azúcar de Candy Crush (sugarcoat_1..3) y caparazón de regaliz
+  Rl.images.push('coat1', 'coat2', 'coat3', 'shell');
+  Rl.images.push('glass1', 'glass2', 'glass3', 'ww_wrap', 'cobra'); for (let i = 0; i < 6; i++) Rl.images.push('ww_rib' + i);
+  Rl.glassTile = (g, s, n) => { const im = E.img('glass' + Math.max(1, Math.min(3, n))); if (!im) return false; g.drawImage(im, -s / 2, -s / 2, s, s); return true; };
+  // paquetito precioso: la caja y encima las cintas que quedan, de abajo arriba
+  Rl.wonderWrapper = (g, w, h, cols) => {
+    const box = E.img('ww_wrap'); if (!box) return false;
+    const k = Math.min(w / box.width, h / box.height) * 0.95; g.drawImage(box, (w - box.width * k) / 2, (h - box.height * k) / 2, box.width * k, box.height * k);
+    const bh = box.height * k, by = (h - bh) / 2;
+    cols.forEach((c, i) => { const r = E.img('ww_rib' + c); if (!r) return; const kr = (bh * 1.25) / r.height, x = w / 2 + (i - (cols.length - 1) / 2) * w * 0.22; g.drawImage(r, x - (r.width * kr) / 2, by - bh * 0.125, r.width * kr, r.height * kr); });
+    return true;
+  };
+  Rl.selPulse = 0.015; // Candy Crush no anima la pieza tocada (emulador, 23-10-2026): solo un aviso mínimo
+  Rl.sugarCoat = (g, s, n) => { const im = E.img('coat' + Math.max(1, Math.min(3, n))); if (!im) return false; g.drawImage(im, -s / 2, -s / 2, s, s); return true; };
+  // rana de Candy Crush 1.119, teñida del color que se come
+  for (let i = 0; i < 6; i++) Rl.images.push('frog' + i);
+  Rl.frogImg = (c) => 'frog' + ((c || 0) % 6);
+  for (let i = 0; i < 6; i++) Rl.images.push('froga' + i + '.webp');
+  Rl.scripts = (Rl.scripts || []).concat(['frog.js']);
+  Rl.frogAnim = (g, t, fs) => {
+    const M = window.FROG, sh = M && E.img('froga' + ((t.color || 0) % 6) + '.webp'); if (!sh) return false;
+    const k = t.fillK || 0, an = M.anims[k >= 1 ? 's5' : k >= 0.4 ? 's3' : 's1'];
+    const f = an[Math.floor(E.t * M.fps) % an.length], d = fs * 1.5;
+    g.drawImage(sh, (f % M.cols) * M.w, Math.floor(f / M.cols) * M.h, M.w, M.h, -d / 2, -d * 0.55, d, d); return true;
+  };
+  Rl.emoji['🐸'] = fit('frog3', 1.0);
+  // lo que aún se dibuja con un emoji (iconos de objetivos y piezas sin imagen WebGL), con su imagen original
+  Object.assign(Rl.emoji, { '🔒': fit('slock1', 0.95), '🌀': fit('mixer', 0.95), '💀': fit('skull1', 0.95), '🐚': fit('shell', 0.95), '🐍': fit('cobra', 0.95), '🥥': fit('coco', 0.95), '🛸': fit('ufo', 0.95), '🔗': fit('twist', 0.95) });
+  Object.assign(Rl.emoji, { '🌈': fit('cbomb', 0.95), '🔑': fit('key', 0.95), '🍒': fit('cherry', 0.95), '〰️': fit('c4h', 0.95), '🍬': fit('c0w', 0.95) }); // también los potenciadores de partida
 })();
 
 // ================================================================ 'nueva': patio andaluz con dulces de siempre

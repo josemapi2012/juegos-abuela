@@ -1,4 +1,94 @@
 'use strict';
+// Reproductor mínimo de esqueletos Spine 4.0 (formato JSON), hecho para este proyecto.
+// Soporta huesos (giro, posición, escala, cizalla), imágenes de región, cambio de imagen y color de las ranuras,
+// y animaciones por claves (lineales o escalonadas). Las mallas deformables no se dibujan.
+const SpineLite = (function () {
+  const D2R = Math.PI / 180;
+  function Skeleton(data, skinName, images) {
+    this.data = data; this.images = images;
+    this.bones = data.bones.map((b) => ({ d: b, parent: null, x: 0, y: 0, rot: 0, sx: 1, sy: 1, shx: 0, shy: 0, a: 1, b: 0, c: 0, dd: 1, wx: 0, wy: 0 }));
+    const byName = {}; this.bones.forEach((b) => { byName[b.d.name] = b; });
+    this.bones.forEach((b) => { if (b.d.parent) b.parent = byName[b.d.parent]; });
+    this.boneByName = byName;
+    // imágenes: la piel elegida encima de la de por defecto
+    this.att = {};
+    for (const sk of data.skins) if (sk.name === 'default' || sk.name === skinName) for (const [slot, atts] of Object.entries(sk.attachments || {})) {
+      this.att[slot] = Object.assign(this.att[slot] || {}, atts);
+    }
+    this.slots = data.slots.map((s) => ({ d: s, bone: byName[s.bone], att: s.attachment || null, col: hex(s.color) }));
+    this.slotByName = {}; this.slots.forEach((s) => { this.slotByName[s.d.name] = s; });
+    this.order = this.slots.slice();
+    this.setup();
+  }
+  function hex(h) { if (!h) return [1, 1, 1, 1]; return [0, 2, 4, 6].map((i) => parseInt(h.substr(i, 2) || 'ff', 16) / 255); }
+  Skeleton.prototype.setup = function () {
+    for (const b of this.bones) { const d = b.d; b.x = d.x || 0; b.y = d.y || 0; b.rot = d.rotation || 0; b.sx = d.scaleX == null ? 1 : d.scaleX; b.sy = d.scaleY == null ? 1 : d.scaleY; b.shx = d.shearX || 0; b.shy = d.shearY || 0; }
+    for (const s of this.slots) { s.att = s.d.attachment || null; s.col = hex(s.d.color); }
+  };
+  // valor de una pista en el tiempo t (claves con time; sin time = 0)
+  function sample(keys, t, fields, defs) {
+    let i = 0; while (i < keys.length - 1 && (keys[i + 1].time || 0) <= t) i++;
+    const k0 = keys[i], t0 = k0.time || 0;
+    const val = (k, f, j) => (k[f] == null ? defs[j] : k[f]);
+    if (i === keys.length - 1 || t < t0 || k0.curve === 'stepped') return fields.map((f, j) => val(k0, f, j));
+    const k1 = keys[i + 1], t1 = k1.time || 0, q = (t - t0) / Math.max(1e-6, t1 - t0);
+    return fields.map((f, j) => val(k0, f, j) + (val(k1, f, j) - val(k0, f, j)) * q);
+  }
+  Skeleton.prototype.apply = function (anim, t) {
+    const A = this.data.animations[anim]; if (!A) return;
+    this.setup();
+    for (const [bn, tl] of Object.entries(A.bones || {})) {
+      const b = this.boneByName[bn]; if (!b) continue; const d = b.d;
+      if (tl.rotate) b.rot = (d.rotation || 0) + sample(tl.rotate, t, ['value'], [0])[0];
+      if (tl.translate) { const v = sample(tl.translate, t, ['x', 'y'], [0, 0]); b.x = (d.x || 0) + v[0]; b.y = (d.y || 0) + v[1]; }
+      if (tl.scale) { const v = sample(tl.scale, t, ['x', 'y'], [1, 1]); b.sx = (d.scaleX == null ? 1 : d.scaleX) * v[0]; b.sy = (d.scaleY == null ? 1 : d.scaleY) * v[1]; }
+      if (tl.shear) { const v = sample(tl.shear, t, ['x', 'y'], [0, 0]); b.shx = (d.shearX || 0) + v[0]; b.shy = (d.shearY || 0) + v[1]; }
+    }
+    for (const [sn, tl] of Object.entries(A.slots || {})) {
+      const s = this.slotByName[sn]; if (!s) continue;
+      if (tl.attachment) { let k = null; for (const kf of tl.attachment) if ((kf.time || 0) <= t) k = kf; if (k) s.att = k.name || null; }
+      if (tl.rgba) { let i = 0; while (i < tl.rgba.length - 1 && (tl.rgba[i + 1].time || 0) <= t) i++; s.col = hex(tl.rgba[i].color); }
+    }
+  };
+  Skeleton.prototype.duration = function (anim) {
+    const A = this.data.animations[anim]; let m = 0; if (!A) return 0;
+    const scan = (o) => { if (Array.isArray(o)) o.forEach((k) => { if (k && k.time > m) m = k.time; }); else if (o && typeof o === 'object') Object.values(o).forEach(scan); };
+    scan(A); return m;
+  };
+  Skeleton.prototype.update = function () {
+    for (const b of this.bones) {
+      const ra = (b.rot + b.shx) * D2R, rb = (b.rot + 90 + b.shy) * D2R;
+      const la = Math.cos(ra) * b.sx, lb = Math.cos(rb) * b.sy, lc = Math.sin(ra) * b.sx, ld = Math.sin(rb) * b.sy;
+      const p = b.parent;
+      if (!p) { b.a = la; b.b = lb; b.c = lc; b.dd = ld; b.wx = b.x; b.wy = b.y; continue; }
+      b.a = p.a * la + p.b * lc; b.b = p.a * lb + p.b * ld; b.c = p.c * la + p.dd * lc; b.dd = p.c * lb + p.dd * ld;
+      b.wx = p.a * b.x + p.b * b.y + p.wx; b.wy = p.c * b.x + p.dd * b.y + p.wy;
+    }
+  };
+  // dibuja con el origen del esqueleto en (x,y) y la escala dada (Spine tiene el eje Y hacia arriba)
+  Skeleton.prototype.draw = function (g, x, y, scale) {
+    this.update();
+    const m0 = g.getTransform();
+    for (const s of this.order) {
+      if (!s.att) continue;
+      const at = (this.att[s.d.name] || {})[s.att]; if (!at || (at.type && at.type !== 'region')) continue;
+      const im = this.images(at.path || at.name || s.att); if (!im) continue;
+      const b = s.bone;
+      g.save();
+      g.globalAlpha = s.col[3];
+      g.setTransform(m0);
+      g.translate(x, y); g.scale(scale, -scale);
+      g.transform(b.a, b.c, b.b, b.dd, b.wx, b.wy);
+      g.translate(at.x || 0, at.y || 0); g.rotate((at.rotation || 0) * D2R); g.scale(at.scaleX == null ? 1 : at.scaleX, at.scaleY == null ? 1 : at.scaleY);
+      const w = at.width || im.width, h = at.height || im.height;
+      g.scale(1, -1);
+      g.drawImage(im, -w / 2, -h / 2, w, h);
+      g.restore();
+    }
+  };
+  return { Skeleton };
+})();
+'use strict';
 // Partes comunes del estilo 'nueva' (patio andaluz): interfaz de cerámica blanca con cenefa azul,
 // fondo de patio con macetas y mapa por un pueblo blanco. Cada juego añade sus piezas en su skins.js.
 const NUEVA = (function () {
@@ -301,7 +391,174 @@ function burbujaSimbolo(g, color, cx, cy, s) {
   const O = GAME.skins.original;
   const MAP = { 0: 'b0', 1: 'b1', 2: 'b2', 3: 'b3', 4: 'b4', 5: 'b5', rainbow: 'rainbow', metal: 'metal', spike: 'spike', smoke: 'smoke', gift: 'gift' };
   const Rl = (GAME.skins.real = Object.assign({}, O, { images: ['b0', 'b1', 'b2', 'b3', 'b4', 'b5', 'rainbow', 'metal', 'spike', 'smoke', 'gift', 'crystal'] }));
+
+  const MAPIMG = (z) => 'bg' + (z % 7) + '.jpg';
+  Rl.images = Rl.images.concat([0, 1, 2, 3, 4, 5, 6].map((i) => 'bg' + i + '.jpg').filter((n) => !Rl.images.includes(n)));
+  // mapa: cada mundo con su fondo del juego original, a lo ancho de la pantalla (sin los adornos de emoji)
+  Rl.mapNoDecor = true;
+  Rl.mapBg = (g, top, zoneH) => {
+    const z0 = Math.floor(top / zoneH);
+    for (let z = z0 - 1; z <= z0 + 1; z++) {
+      if (z < 0) continue;
+      const zy = -z * zoneH - zoneH + top + E.H, im = E.img(MAPIMG(z)); if (!im) return O.mapBg ? O.mapBg(g, top, zoneH) : null;
+      const s = Math.max(E.W / im.width, zoneH / im.height); g.drawImage(im, (E.W - im.width * s) / 2, zy + (zoneH - im.height * s) / 2, im.width * s, im.height * s);
+    }
+  };
   Rl.bubbleImg = (color) => MAP[color] || null;
+  // ---- piezas de Panda Pop: cría, farolillos y fondos de partida
+  const UI = ['baby_face', 'mama', 'lan_stick', 'lan_red_on', 'lan_red_off', 'lan_blue_on', 'lan_blue_off', 'lan_green_on', 'lan_green_off', 'lan_yellow_on', 'lan_yellow_off'];
+  Rl.images = Rl.images.concat(UI, [0, 1, 2, 3, 4, 5, 6].map((i) => 'bg' + i + '.jpg'));
+  const fitImg = (name, k) => (g, w, h) => { const im = E.img(name); if (!im) return; const s = Math.min((w * k) / im.width, (h * k) / im.height); g.drawImage(im, (w - im.width * s) / 2, (h - im.height * s) / 2, im.width * s, im.height * s); };
+  Rl.emoji = Object.assign({}, O.emoji || {}, { '🐼': fitImg('baby_face', 1.0), '🏮': fitImg('lan_red_on', 0.95), '➕': fitImg('o_plus', 0.95), '🌈': fitImg('rainbow', 0.95),
+    '💣': fitImg('o_sfire', 0.95), '🔄': fitImg('i_swapc', 0.95), '⚙️': fitImg('i_settings', 0.8) }); // cría, potenciadores y ajustes con sus dibujos de Panda Pop
+  Rl.images.push('i_swapc', 'i_settings');
+  // farolillo de Panda Pop: apagado y, por encima, el encendido llenándose de abajo arriba
+  const LAN = ['red', 'blue', 'green', 'yellow'];
+  Rl.lantern = (g, i, x, y, w, h, lvl, full) => {
+    const off = E.img('lan_' + LAN[i] + '_off'), on = E.img('lan_' + LAN[i] + '_on'), st = E.img('lan_stick'); if (!off || !on) return false;
+    const s = Math.min((w * 1.25) / off.width, (h * 1.15) / off.height), W = off.width * s, H = off.height * s, x0 = x - W / 2, y0 = y - H / 2;
+    if (st) g.drawImage(st, x - W * 0.6, y0 - H * 0.22, W * 1.2, W * 0.45);
+    g.drawImage(off, x0, y0, W, H);
+    const k = Math.max(0, Math.min(1, lvl));
+    if (k > 0) g.drawImage(on, 0, on.height * (1 - k), on.width, on.height * k, x0, y0 + H * (1 - k), W, H * k);
+    if (full) { g.globalAlpha = 0.35 + Math.sin(E.t * 6) * 0.15; g.drawImage(on, x0 - W * 0.06, y0 - H * 0.06, W * 1.12, H * 1.12); g.globalAlpha = 1; }
+    return true;
+  };
+  // mamá panda animada (esqueleto Spine del juego renderizado a fotogramas: privado/burbujas/mama.webp + mama.js)
+  // burbuja dado (cambia de color) y burbuja del mandril, de Panda Pop 9.1 (2019): ya no vienen en el juego actual
+  const DICE = ['dice_fire', 'dice_water', 'dice_grass', 'dice_sun', 'dice_purple', 'dice_pink'];
+  Rl.images.push(...DICE, 'badboon');
+  // obstáculos y adornos de Panda Pop montados como en sus prefabs (tools/privado.py → burbujas_obs): o_<pieza>
+  const OB = ['cloud', 'ivy', 'ivymom', 'bamboo', 'rev', 'rocketo', 'iceb', 'volcano', 'drain', 'foam', 'gspike', 'gspike_off', 'fan', 'bumper', 'fairy', 'rock', 'cannon',
+    'chain', 'lock', 'leaf', 'rope1', 'rope2', 'mask', 'shield', 'rot', 'charger', 'crystalm', 'swap', 'plus', 'death', 'cd', 'morph'];
+  for (let i = 0; i < 6; i++) OB.push('ghost' + i);
+  Rl.images.push(...OB.map((n) => 'o_' + n));
+  for (const k of ['cloud', 'ivy', 'ivymom', 'bamboo', 'rev', 'iceb', 'volcano', 'drain', 'foam', 'gspike', 'bumper', 'fairy', 'rock']) MAP[k] = 'o_' + k;
+  MAP.gspikeOff = 'o_gspike_off';
+  // reventón de Panda Pop: la burbuja se hincha un poco y salta la salpicadura teñida de su color (9 fotogramas en 0,3 s)
+  for (let i = 0; i < 9; i++) Rl.images.push('fxpop' + i);
+  const POPC = ['#ff4040', '#3f8cff', '#46c846', '#ffd23f', '#a04bff', '#ff6ec7'];
+  Rl.popFx = (g, b, x, y, size, t, drawB) => {
+    const f = Math.floor(t / (0.3 / 9)); if (f >= 9) return true;
+    if (f < 3) { const o = b.sc; b.sc = 1 + f * 0.06; drawB(g, b, x, y, size); b.sc = o; }
+    const col = POPC[b.color] || '#ffffff', im = E.tinted('fxpop' + f, col) || E.img('fxpop' + f); if (!im) return false;
+    const d = size * (0.6 + f * 0.12); g.drawImage(im, x - d / 2, y - d / 2, d, d); return true;
+  };
+  Rl.images.push('o_rune', 'o_runeglow', 'o_sfire', 'o_swater', 'o_svine', 'o_ssun');
+  Object.assign(MAP, { rune: 'o_rune', runeOn: 'o_rune', sfire: 'o_sfire', swater: 'o_swater', svine: 'o_svine', ssun: 'o_ssun' });
+  const ANG = [0, Math.PI / 3, (2 * Math.PI) / 3, Math.PI, (4 * Math.PI) / 3, (5 * Math.PI) / 3]; // como ROCKET_ANG del juego
+  const put = (g, name, x, y, w, rot, flip) => { // dibuja la pieza centrada con ancho w, girada y/o volteada
+    const im = E.img(name); if (!im) return false;
+    const h = (w * im.height) / im.width; g.save(); g.translate(x, y); if (rot) g.rotate(rot); if (flip) g.scale(-1, 1);
+    g.drawImage(im, -w / 2, -h / 2, w, h); g.restore(); return true;
+  };
+  const A0 = [-2 * Math.PI / 3, -Math.PI / 3, 0, Math.PI / 3, 2 * Math.PI / 3, Math.PI]; // lados del escudo, mismo orden que en el juego
+  Rl.images.push('o_balloon0', 'o_balloon1', 'o_balloon2', 'o_balloon3', 'o_balloon4', 'o_balloon5', 'o_balloonglow');
+  Rl.bubbleMark = (g, k, b, x, y, s) => {
+    switch (k) {
+      case 'balloon': { // globo: el farolillo volante de su color (BalloonBubble) tapa la burbuja, con el brillo de su llama
+        if (!put(g, 'o_balloon' + b.color, x, y - s * 0.04, s * 1.0)) return false;
+        g.save(); g.globalCompositeOperation = 'lighter'; g.globalAlpha *= 0.6; put(g, 'o_balloonglow', x, y + s * 0.4, s * 0.42); g.restore(); return true;
+      }
+      case 'dice': return put(g, DICE[b.color], x, y, s);
+      case 'baboon': return put(g, 'badboon', x, y, s * 0.98);
+      case 'ghost': return put(g, 'o_ghost' + b.color, x, y, s * 1.02);
+      case 'chain': return put(g, 'o_chain', x, y, s * 1.05);
+      case 'lock': return put(g, 'o_lock', x, y, s * 1.05);
+      case 'morph': { g.save(); g.globalAlpha *= 0.85; const r = put(g, 'o_morph', x, y, s * 0.9); g.restore(); return r; }
+      case 'leaf': return put(g, 'o_leaf', x, y, s * 1.0);
+      case 'rope': return put(g, b.rope > 1 ? 'o_rope2' : 'o_rope1', x, y, s * 1.02);
+      case 'mask': return put(g, 'o_mask', x, y, s * 0.9);
+      case 'shield': return put(g, 'o_shield', x, y, s * 1.12, (A0[b.shield] || 0) + Math.PI / 2); // el hueco mira hacia su lado abierto
+      case 'rot': return put(g, 'o_rot', x, y, s * 1.0, E.t * 0.8);
+      case 'charger': return put(g, 'o_charger', x, y, s * 0.95);
+      case 'crystal': return put(g, 'o_crystalm', x, y, s * 0.8);
+      case 'swap': return put(g, 'o_swap', x + s * 0.25, y, s * 0.55);
+      case 'plus': return put(g, 'o_plus', x, y, s * 0.95);
+      case 'death': return put(g, 'o_death', x, y, s * 1.0);
+      case 'cd': { if (!put(g, 'o_cd', x, y, s * 1.0)) return false; E.text(g, String(b.cd), x, y + 1, s * 0.36, b.cd <= 2 ? '#ff5050' : '#fff', { stroke: '#3a1a00', sw: 3 }); return true; }
+      case 'rocketo': return put(g, 'o_rocketo', x, y, s * 1.0, ANG[b.dir || 0]);
+      case 'cannon': return put(g, 'o_cannon', x, y, s * 1.0, ANG[b.dir || 0] + Math.PI);
+      case 'fan': return put(g, 'o_fan', x, y, s * 1.0, b.on !== false ? 0 : 0, (b.dir || 1) < 0);
+      case 'ice': { g.save(); g.globalAlpha *= 0.7; const r = put(g, 'o_iceb', x, y, s * 1.0); g.restore(); return r; }
+    }
+    return false;
+  };
+  Rl.images.push('mama.webp');
+  Rl.scripts = (Rl.scripts || []).concat(['mama.js']);
+  const DIRS = ['Left', 'Left&Up', 'Up&Left', 'StraightUp', 'Up&Right', 'Right&Up', 'Right'];
+  const dirOf = (a) => { if (a == null) return 'StraightUp'; const d = (-a * 180) / Math.PI; return DIRS[d > 150 ? 0 : d > 120 ? 1 : d > 100 ? 2 : d > 80 ? 3 : d > 60 ? 4 : d > 30 ? 5 : 6]; };
+  let endT = null;
+  Rl.launcher = (g, x, y, size, st) => {
+    const M = window.MAMA, sheet = E.img('mama.webp'); if (!M || !sheet) return false;
+    const panic = st.moves <= 5, state = E.play && E.play.state;
+    let name, t;
+    if (state === 'won' || state === 'lost') { if (endT == null) endT = E.t; name = state === 'won' ? 'React_Win' : 'React_Lose'; t = E.t - endT; }
+    else {
+      endT = null;
+      const sh = st.shot, dur = sh ? M.anims['Throw_' + dirOf(sh.ang)].length / M.fps : 0;
+      if (sh && E.t - sh.t < dur) { name = panic ? 'ThrowPanic_StraightUp' : 'Throw_' + dirOf(sh.ang); t = E.t - sh.t; }
+      else { name = panic ? 'IdlePanic_LookStraightUp' : 'Idle_Look' + dirOf(st.ang); t = E.t; }
+    }
+    const fr = M.anims[name] || M.anims.Idle_LookStraightUp;
+    const once = name.startsWith('Throw') || name === 'React_Lose';
+    const i = fr[once ? Math.min(fr.length - 1, Math.floor(t * M.fps)) : Math.floor(t * M.fps) % fr.length];
+    const k = (size * 4.4) / M.h, cx = (i % M.cols) * M.w, cy = Math.floor(i / M.cols) * M.h;
+    // como en Panda Pop: en el centro, con la burbuja del lanzador en las manos (a la altura de la tripa)
+    g.drawImage(sheet, cx, cy, M.w, M.h, x - M.ox * k, y + size * 1.55 - M.oy * k, M.w * k, M.h * k);
+    return true;
+  };
+  // cesto de Panda Pop: fondo, la siguiente burbuja, el frente y el medallón con las burbujas que quedan
+  Rl.images.push('basket_back', 'basket_front', 'basket_movecountframe');
+  Rl.basket = (g, x, y, size, drawNext, moves) => {
+    const bk = E.img('basket_back'), fr = E.img('basket_front'), md = E.img('basket_movecountframe'); if (!bk || !fr) return false;
+    const w = size * 1.5, k = w / fr.width, bx = x - size * 0.3;
+    g.drawImage(bk, bx - (bk.width * k) / 2, y - size * 0.2, bk.width * k, bk.height * k);
+    drawNext(bx, y - size * 0.15, size * 0.8);
+    g.drawImage(fr, bx - w / 2, y + size * 0.05, w, fr.height * k);
+    const mx = x + size * 0.75, ms = size * 0.85;
+    if (md) g.drawImage(md, mx - ms / 2, y - ms / 2 + size * 0.2, ms, ms);
+    E.text(g, String(moves), mx, y + size * 0.22, size * 0.42, '#fff', { stroke: '#5a2a10', sw: 4 });
+    return true;
+  };
+  // tiempos medidos en el Panda Pop real (emulador, 2026-10-22): el tiro vuela a más de 42 diámetros/s y los reventones
+  // se encadenan en ~0,4 s desde donde golpea
+  Rl.timing = { shot: 45, popStep: 0.015, popMax: 0.4 };
+  Rl.nextGap = 3.1; // el cesto apartado de mamá panda, sin tocarla (con 2,4 el medallón se le montaba encima)
+  Rl.shooterLift = 1.6; // lanzador más arriba, con mamá panda de pie debajo
+  // crías animadas (esqueleto Spine BabyPanda renderizado a fotogramas): dentro de su burbuja y bajando en paracaídas
+  Rl.images.push('baby_bubble.webp', 'baby_para.webp');
+  Rl.scripts = Rl.scripts.concat(['baby_bubble.js', 'baby_para.js']);
+  const frameOf = (M, sheet, name, t, loop) => { const fr = M.anims[name]; const i = fr[loop ? Math.floor(t * M.fps) % fr.length : Math.min(fr.length - 1, Math.floor(t * M.fps))]; return [(i % M.cols) * M.w, Math.floor(i / M.cols) * M.h]; };
+  Rl.babyBubble = (g, x, y, s, id) => {
+    const M = window.BABY_BUBBLE, sh = E.img('baby_bubble.webp'); if (!M || !sh) return false;
+    const [cx, cy] = frameOf(M, sh, 'panda_bubble_idle_01', E.t + (id % 11) * 0.37, true), k = (s * 0.84) / M.w;
+    g.drawImage(sh, cx, cy, M.w, M.h, x - (M.w * k) / 2, y - (M.h * k) / 2 + s * 0.03, M.w * k, M.h * k); // dentro de la burbuja de color, como en Panda Pop
+    return true;
+  };
+  Rl.parachute = (g, x, y, size, t) => {
+    const M = window.BABY_PARA, sh = E.img('baby_para.webp'); if (!M || !sh) return false;
+    const [cx, cy] = frameOf(M, sh, 'panda_escape_flying_down', t, true), k = (size * 2.2) / M.h;
+    g.drawImage(sh, cx, cy, M.w, M.h, x - M.ox * k, y + size * 0.6 - M.oy * k, M.w * k, M.h * k);
+    return true;
+  };
+  // fondos de partida de Panda Pop (cambian cada 10 niveles)
+  Rl.playBg = (g, w, h) => { const im = E.img('bg' + (Math.floor((((E.play && E.play.n) || 1) - 1) / 10) % 7) + '.jpg'); if (!im) return O.playBg ? O.playBg(g, w, h) : null; const s = Math.max(w / im.width, h / im.height); g.drawImage(im, (w - im.width * s) / 2, (h - im.height * s) / 2, im.width * s, im.height * s); };
+  // sonidos de Panda Pop (AudioClip del juego con su nombre) y su fuente PoetsenOne
+  Rl.font = 'font.ttf';
+  Rl.sfx = {
+    shoot: ['BubbleThrow1', 'BubbleThrow2', 'BubbleThrow3'], pop: ['BubblePop'], land: ['BubbleLand'], swap: ['BubbleSwitch'], bad: ['BubbleBounce'],
+    rocket: ['SuperBubbleThrown'], special: ['SuperBubbleCollide1', 'SuperBubbleCollide2'], magic: ['SuperBubbleCollideFull'], bomb: ['SuperEffectSfxFire'],
+    rescue: ['BabyPandaUnlockStart'], collect: ['LanternFilled'], click: ['ButtonTap'], star: ['Combo1'], win: ['GameVictoryIntro'], lose: ['GameOverIntro'],
+  };  Object.assign(Rl.sfx, { popIn: ['PopUpAppear'], popOut: ['PopUpClose'] }); // ventanas de Panda Pop
+  Rl.wheel = { colors: ['#e8322b', '#2f9ae8', '#3cb93c', '#ff9a1e', '#9a4fd6', '#ff6fae'], rim: '#8a5a2b', hub: '#e8f6d8', arrowColor: '#e8322b' }; // ruleta de madera con los colores de las burbujas
+  // los que suenan muchas veces por tiro, más bajos (el farolillo suena con cada burbuja de su color)
+  Rl.sfxVol = { BubblePop: -4, LanternFilled: -9, BubbleBounce: -6, SuperBubbleCollide1: -3, SuperBubbleCollide2: -3 };
+
+  // una música para cada mundo de 10 niveles, en el orden de Panda Pop
+  const MUS = ['mus_pandapop_neon_city_world15', 'mus_panda_pop_world19_ricefield', 'mus_panda_pop_world22_glacialtrail', 'mus_panda_pop_world26_ancient_canyon',
+    'mus_panda_pop_world_castlevania', 'mus_panda_pop_world_clocktower', 'mus_panda_pop_world_forgotten_sea_castle', 'mus_panda_pop_world_hedgemaze', 'mus_panda_pop_world_watertemple', 'mus_panda_pop_worldXX_dojo'];
+  Rl.music = { game: () => MUS[Math.floor((((E.play && E.play.n) || 1) - 1) / 10) % MUS.length], map: 'mus_panda_pop_map_lp-7-24-14' };
 })();
 
 // ================================================================ 'nueva': patio andaluz (bolas de cerámica pintadas)

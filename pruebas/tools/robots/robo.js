@@ -4,7 +4,8 @@ window.robo = function (n) {
   for (let i = 0; i < 120; i++) E.step(1 / 30);
   const P = E.play.P, S = P.S;
   const lay = E.play.layout.board;
-  const ts = Math.min(lay.w / S.C, lay.h / S.R, 76), bx = lay.x + (lay.w - ts * S.C) / 2, by = lay.y + (lay.h - ts * S.R) / 2;
+  let ts = Math.min(lay.w / S.C, lay.h / S.R, 76), bx = lay.x + (lay.w - ts * S.C) / 2, by = lay.y + (lay.h - ts * S.R) / 2;
+  const gs = P.glState && P.glState(); if (gs) ({ ts, bx, by } = gs); // Dulces HD: el tablero lo coloca WebGL
   const xy = (r, c) => [bx + c * ts + ts / 2, by + r * ts + ts / 2];
   let frogs = 0, guard = 0;
   const m0 = P.moves;

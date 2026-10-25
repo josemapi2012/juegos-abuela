@@ -5,7 +5,7 @@
 
 const GAME = {
   id: 'burbujas',
-  title: 'Burbujas Panda',
+  title: 'Burbujas HD',
   theme: {
     mascot: '🐼',
     accent: '#ff5c8a',
@@ -62,8 +62,17 @@ const GAME = {
   const get = (S, r, c) => (r >= 0 && r < S.grid.length && c >= 0 && c < colsIn(r) ? S.grid[r][c] : null);
   function ensureRows(S, n) { while (S.grid.length < n) S.grid.push(new Array(colsIn(S.grid.length)).fill(null)); }
   function lowestRow(S) { for (let r = S.grid.length - 1; r >= 0; r--) if (S.grid[r].some(Boolean)) return r; return -1; }
-  function scrollFor(S) { return Math.max(0, (lowestRow(S) - VIEW_ROWS) * RH); }
-  const shooterY = (S, viewH) => scrollFor(S) + viewH - 52;
+  // altura del lanzador; el estilo puede subirlo (en diámetros) para que quepa mamá panda entera, como en Panda Pop
+  const lift = () => (E.skin('shooterLift') || 0) * D;
+  // la vista baja hasta dejar un hueco de GAP diámetros entre la última fila y el lanzador (como en Panda Pop, ~5),
+  // sin pasar de VIEW_ROWS filas, y en filas enteras: la de arriba nunca se ve cortada
+  const GAP = 5;
+  function scrollFor(S, viewH) {
+    let want = (lowestRow(S) - VIEW_ROWS) * RH;
+    if (viewH) want = Math.max(want, lowestRow(S) * RH + D / 2 + GAP * D - (viewH - 52 - lift()));
+    return Math.max(0, Math.ceil(want / RH - 0.01) * RH);
+  }
+  const shooterY = (S, viewH) => scrollFor(S, viewH) + viewH - 52 - lift();
 
   // ------------------------------------------------------------ dibujo
   // imagen del estilo elegido (solo el estilo 'Original', con las imágenes que hay en la tablet)
@@ -139,7 +148,11 @@ const GAME = {
   const ROCKET_ANG = [0, Math.PI / 3, (2 * Math.PI) / 3, Math.PI, (4 * Math.PI) / 3, (5 * Math.PI) / 3];
   const isObs = (b) => b && OBS[b.color] != null || (b && b.color === 'rune');
   // burbujas que sujetan a las demás (no caen nunca): fijas, encadenadas, nubes, madre de la hiedra, bambú y revólver
-  const anchor = (b) => b && (b.fixed || b.chain || b.rope || b.color === 'cloud' || b.color === 'ivymom' || b.color === 'bamboo' || b.color === 'rev');
+  const anchor = (b) => b && (b.fixed || b.balloon || b.chain || b.rope || b.color === 'cloud' || b.color === 'ivymom' || b.color === 'bamboo' || b.color === 'rev');
+  // fijas y globos (Panda Pop: BubblePopLogicService.SetupAnchors e IsStationaryBubbleIsolated): solo sujetan si tocan
+  // alguna burbuja que no sea de su misma clase; un grupo de fijas o de globos que se queda solo deja de sujetar y cae
+  // (los globos se van volando)
+  const isoKind = (b) => (b ? (b.fixed ? 'fixed' : b.balloon ? 'balloon' : null) : null);
   function iceCap(size) {
     return E.sprite('icecap', size, size, (g, w, h) => {
       g.beginPath(); g.arc(w / 2, h / 2, w * 0.49, 0, 7); g.fillStyle = 'rgba(210,240,255,0.55)'; g.fill();
@@ -158,43 +171,47 @@ const GAME = {
       g.strokeStyle = 'rgba(150,190,220,0.6)'; g.lineWidth = 1.5; g.beginPath(); g.arc(x, y, s * 0.44, 0, 7); g.stroke();
     } else if (isObs(b)) g.drawImage(obsSprite(b.color === 'rune' && b.on ? 'runeOn' : b.color === 'gspike' && !b.on ? 'gspikeOff' : b.color, size), x - s / 2, y - s / 2, s, s);
     else g.drawImage(bubbleSprite(b.color, size), x - s / 2, y - s / 2, s, s);
+    const skM = E.skin('bubbleMark'); // el estilo puede dibujar los adornos (cadena, candado, máscara, dado...) con sus imágenes
+    const mark = (k) => skM && skM(g, k, b, x, y, s);
     if (b.fixed) { g.lineWidth = s * 0.07; g.strokeStyle = '#6b4a2b'; g.beginPath(); g.arc(x, y, s * 0.44, 0, 7); g.stroke(); g.fillStyle = '#6b4a2b'; g.fillRect(x - s * 0.04, y - s * 0.62, s * 0.08, s * 0.2); }
-    if (b.chain) { const cs = s * 0.6; g.drawImage(E.emojiSprite('⛓️', cs), x - cs / 2, y - cs / 2, cs, cs); }
-    if (b.lock) { const cs = s * 0.5; g.drawImage(E.emojiSprite('🔒', cs), x - cs / 2, y - cs / 2, cs, cs); }
-    if (b.morph) { const cs = s * 0.42; g.drawImage(E.emojiSprite('✨', cs), x + s * 0.12, y - s * 0.5, cs, cs); }
-    if (b.color === 'fan' || b.color === 'cannon') { // ventilador y cañón: dibujo que apunta
+    if (b.chain && !mark('chain')) { const cs = s * 0.6; g.drawImage(E.emojiSprite('⛓️', cs), x - cs / 2, y - cs / 2, cs, cs); }
+    if (b.lock && !mark('lock')) { const cs = s * 0.5; g.drawImage(E.emojiSprite('🔒', cs), x - cs / 2, y - cs / 2, cs, cs); }
+    if (b.morph && !mark('morph')) { const cs = s * 0.42; g.drawImage(E.emojiSprite('✨', cs), x + s * 0.12, y - s * 0.5, cs, cs); }
+    if ((b.color === 'fan' || b.color === 'cannon') && !mark(b.color)) { // ventilador y cañón: dibujo que apunta
       const rs = s * 0.6; g.save(); g.translate(x, y);
       if (b.color === 'fan') { if (b.on !== false) g.rotate(E.t * 8); g.drawImage(E.emojiSprite('🪭', rs), -rs / 2, -rs / 2, rs, rs); }
       else { g.rotate(ROCKET_ANG[b.dir || 0]); g.fillStyle = '#2b2d33'; g.fillRect(0, -s * 0.1, s * 0.42, s * 0.2); g.beginPath(); g.arc(0, 0, s * 0.2, 0, 7); g.fill(); }
       g.restore();
     }
-    if (b.leaf) { const ls = s * 0.9; g.drawImage(E.emojiSprite('🍃', ls), x - ls / 2, y - ls / 2, ls, ls); }
-    if (b.rope) { g.strokeStyle = b.rope > 1 ? '#6b4a2b' : '#b08a5a'; g.lineWidth = s * (b.rope > 1 ? 0.09 : 0.05); g.beginPath(); g.moveTo(x - s * 0.45, y - s * 0.45); g.lineTo(x + s * 0.45, y + s * 0.45); g.moveTo(x + s * 0.45, y - s * 0.45); g.lineTo(x - s * 0.45, y + s * 0.45); g.stroke(); }
-    if (b.mask) { const ms = s * 0.55; g.drawImage(E.emojiSprite('🎭', ms), x - ms / 2, y - ms / 2, ms, ms); }
-    if (b.charger) { g.strokeStyle = '#fff'; g.lineWidth = s * 0.08; g.beginPath(); g.moveTo(x - s * 0.22, y - s * 0.22); g.lineTo(x + s * 0.22, y + s * 0.22); g.moveTo(x + s * 0.22, y - s * 0.22); g.lineTo(x - s * 0.22, y + s * 0.22); g.stroke(); }
-    if (b.crystal) { g.strokeStyle = 'rgba(255,255,255,0.95)'; g.lineWidth = s * 0.05; g.beginPath(); for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2; g.lineTo(x + Math.cos(a) * s * 0.42, y + Math.sin(a) * s * 0.42); } g.closePath(); g.stroke(); }
-    if (b.rot) { const rs = s * 0.36; g.drawImage(E.emojiSprite('🔄', rs), x - s * 0.5, y - s * 0.5, rs, rs); }
-    if (b.shield != null) { // escudo giratorio con un hueco abierto
+    if (b.leaf && !mark('leaf')) { const ls = s * 0.9; g.drawImage(E.emojiSprite('🍃', ls), x - ls / 2, y - ls / 2, ls, ls); }
+    if (b.rope && !mark('rope')) { g.strokeStyle = b.rope > 1 ? '#6b4a2b' : '#b08a5a'; g.lineWidth = s * (b.rope > 1 ? 0.09 : 0.05); g.beginPath(); g.moveTo(x - s * 0.45, y - s * 0.45); g.lineTo(x + s * 0.45, y + s * 0.45); g.moveTo(x + s * 0.45, y - s * 0.45); g.lineTo(x - s * 0.45, y + s * 0.45); g.stroke(); }
+    if (b.mask && !mark('mask')) { const ms = s * 0.55; g.drawImage(E.emojiSprite('🎭', ms), x - ms / 2, y - ms / 2, ms, ms); }
+    if (b.charger && !mark('charger')) { g.strokeStyle = '#fff'; g.lineWidth = s * 0.08; g.beginPath(); g.moveTo(x - s * 0.22, y - s * 0.22); g.lineTo(x + s * 0.22, y + s * 0.22); g.moveTo(x + s * 0.22, y - s * 0.22); g.lineTo(x - s * 0.22, y + s * 0.22); g.stroke(); }
+    if (b.crystal && !mark('crystal')) { g.strokeStyle = 'rgba(255,255,255,0.95)'; g.lineWidth = s * 0.05; g.beginPath(); for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2; g.lineTo(x + Math.cos(a) * s * 0.42, y + Math.sin(a) * s * 0.42); } g.closePath(); g.stroke(); }
+    if (b.rot && !mark('rot')) { const rs = s * 0.36; g.drawImage(E.emojiSprite('🔄', rs), x - s * 0.5, y - s * 0.5, rs, rs); }
+    if (b.shield != null && !mark('shield')) { // escudo giratorio con un hueco abierto
       g.strokeStyle = '#c0c6d0'; g.lineWidth = s * 0.1; const a0 = [-2 * Math.PI / 3, -Math.PI / 3, 0, Math.PI / 3, 2 * Math.PI / 3, Math.PI]; // mismo orden que ringOf
       const ang = Math.atan2(Math.sin(a0[b.shield] || 0), Math.cos(a0[b.shield] || 0));
       g.beginPath(); g.arc(x, y, s * 0.5, ang + 0.6, ang + 2 * Math.PI - 0.6); g.stroke();
     }
-    if (b.color === 'rocketo') { const rs = s * 0.6; g.save(); g.translate(x, y); g.rotate(ROCKET_ANG[b.dir || 0] + Math.PI / 4); g.drawImage(E.emojiSprite('🚀', rs), -rs / 2, -rs / 2, rs, rs); g.restore(); }
-    if (b.ghost) { const gs = s * 0.4; g.drawImage(E.emojiSprite('👻', gs), x + s * 0.1, y - s * 0.52, gs, gs); }
-    if (b.swapR) { const ws = s * 0.4; g.drawImage(E.emojiSprite('🔁', ws), x + s * 0.3, y - ws / 2, ws, ws); }
-    if (b.dice) { g.strokeStyle = '#fff'; g.lineWidth = s * 0.06; g.strokeRect(x - s * 0.3, y - s * 0.3, s * 0.6, s * 0.6); }
-    if (b.color === 'bamboo' && b.hp > 1) { g.fillStyle = '#4b6b1e'; g.beginPath(); g.arc(x + s * 0.3, y - s * 0.3, s * 0.17, 0, 7); g.fill(); E.text(g, String(b.hp), x + s * 0.3, y - s * 0.29, s * 0.22, '#fff', { stroke: false }); }
-    if (b.cd != null) { g.beginPath(); g.arc(x, y, s * 0.26, 0, 7); g.fillStyle = b.cd <= 2 ? '#d62828' : '#2b2b33'; g.fill(); g.lineWidth = s * 0.05; g.strokeStyle = '#fff'; g.stroke(); E.text(g, String(b.cd), x, y + 1, s * 0.3, '#fff', { stroke: false }); }
-    if (b.ice) { // burbuja congelada: capa de hielo encima
+    if (b.color === 'rocketo' && !mark('rocketo')) { const rs = s * 0.6; g.save(); g.translate(x, y); g.rotate(ROCKET_ANG[b.dir || 0] + Math.PI / 4); g.drawImage(E.emojiSprite('🚀', rs), -rs / 2, -rs / 2, rs, rs); g.restore(); }
+    if (b.ghost && !mark('ghost')) { const gs = s * 0.4; g.drawImage(E.emojiSprite('👻', gs), x + s * 0.1, y - s * 0.52, gs, gs); }
+    if (b.swapR && !mark('swap')) { const ws = s * 0.4; g.drawImage(E.emojiSprite('🔁', ws), x + s * 0.3, y - ws / 2, ws, ws); }
+    if (b.balloon && !mark('balloon')) { g.strokeStyle = '#fff'; g.lineWidth = s * 0.04; g.beginPath(); g.moveTo(x, y + s * 0.45); g.lineTo(x, y + s * 0.62); g.stroke(); }
+    if (b.dice && !mark('dice')) { g.strokeStyle = '#fff'; g.lineWidth = s * 0.06; g.strokeRect(x - s * 0.3, y - s * 0.3, s * 0.6, s * 0.6); }
+    if (b.color === 'bamboo' && b.hp > 1 && !mark('bamboo')) { g.fillStyle = '#4b6b1e'; g.beginPath(); g.arc(x + s * 0.3, y - s * 0.3, s * 0.17, 0, 7); g.fill(); E.text(g, String(b.hp), x + s * 0.3, y - s * 0.29, s * 0.22, '#fff', { stroke: false }); }
+    if (b.cd != null && !mark('cd')) { g.beginPath(); g.arc(x, y, s * 0.26, 0, 7); g.fillStyle = b.cd <= 2 ? '#d62828' : '#2b2b33'; g.fill(); g.lineWidth = s * 0.05; g.strokeStyle = '#fff'; g.stroke(); E.text(g, String(b.cd), x, y + 1, s * 0.3, '#fff', { stroke: false }); }
+    if (b.ice && !mark('ice')) { // burbuja congelada: capa de hielo encima
       g.globalAlpha *= 0.85;
       g.drawImage(iceCap(size), x - s / 2, y - s / 2, s, s);
       g.globalAlpha = b.alpha != null && b.alpha < 1 ? Math.max(0, b.alpha) : 1;
     }
-    if (b.plus || b.baboon || b.death) { const ms = s * 0.62; g.drawImage(E.emojiSprite(b.plus ? '➕' : b.baboon ? '🐒' : '☠️', ms), x - ms / 2, y - ms / 2, ms, ms); }
+    if ((b.plus || b.baboon || b.death) && !mark(b.plus ? 'plus' : b.baboon ? 'baboon' : 'death')) { const ms = s * 0.62; g.drawImage(E.emojiSprite(b.plus ? '➕' : b.baboon ? '🐒' : '☠️', ms), x - ms / 2, y - ms / 2, ms, ms); }
     if (b.panda) {
       // la cría tapa el dibujo del color, pero deja ver el color alrededor
       const ps = s * 0.74;
-      g.drawImage(E.emojiSprite('🐼', ps), x - ps / 2, y - ps / 2 + Math.sin(E.t * 3 + b.id) * 1.5, ps, ps);
+      const skB = E.skin('babyBubble'); // la cría animada dentro de su burbuja (estilo)
+      if (!(skB && skB(g, x, y, s, b.id || 0))) g.drawImage(E.emojiSprite('🐼', ps), x - ps / 2, y - ps / 2 + Math.sin(E.t * 3 + b.id) * 1.5, ps, ps);
     }
     g.restore();
   }
@@ -270,7 +287,21 @@ const GAME = {
     const seen = new Set();
     const stack = [];
     for (let c = 0; c < colsIn(0); c++) if (S.grid[0] && S.grid[0][c]) { seen.add(c); stack.push([0, c]); }
-    for (let r = 1; r < S.grid.length; r++) for (let c = 0; c < colsIn(r); c++) if (anchor(S.grid[r][c])) { seen.add(r * 64 + c); stack.push([r, c]); }
+    const iso = new Map(); // grupo de fijas o de globos → aislado
+    const isolated = (r, c) => {
+      const k0 = r * 64 + c; if (iso.has(k0)) return iso.get(k0);
+      const kind = isoKind(S.grid[r][c]), grp = [[r, c]], vis = new Set([k0]); let touches = false;
+      for (let i = 0; i < grp.length; i++) for (const [nr, nc] of neighbors(grp[i][0], grp[i][1])) {
+        const o = get(S, nr, nc), k = nr * 64 + nc; if (!o || vis.has(k)) continue;
+        if (isoKind(o) === kind) { vis.add(k); grp.push([nr, nc]); } else touches = true;
+      }
+      for (const k of vis) iso.set(k, !touches);
+      return !touches;
+    };
+    for (let r = 1; r < S.grid.length; r++) for (let c = 0; c < colsIn(r); c++) {
+      const b = S.grid[r][c];
+      if (anchor(b) && !(isoKind(b) && !b.chain && !b.rope && isolated(r, c))) { seen.add(r * 64 + c); stack.push([r, c]); }
+    }
     while (stack.length) {
       const [r, c] = stack.pop();
       for (const [nr, nc] of neighbors(r, c)) {
@@ -367,6 +398,18 @@ const GAME = {
     return out;
   }
   // Coloca la burbuja disparada y resuelve. Devuelve lo que pasó. K recibe los eventos.
+  // Puntos como en Panda Pop (ScoreManager y BubbleDisplay*.get_Score*, descompilados): burbuja normal 10 al reventar y 20 al
+  // caer, especiales 50, y 500 más si lleva una cría. Además, las rachas: cada turno seguido que revienta suma otra vez lo
+  // reventado ×(racha − 1) y cada turno seguido que tira burbujas, lo tirado ×2·racha (las dos hasta ×6)
+  function bubblePoints(o, drop) {
+    const plain = typeof o.color === 'number' && !o.plus && !o.baboon && !o.death && !o.dice && !o.crystal && !o.charger && !o.rope;
+    return (plain ? (drop ? 20 : 10) : 50) + (o.panda ? 500 : 0);
+  }
+  function scoreTurn(S, pop, drop) {
+    S.popSt = pop ? S.popSt + 1 : 0; S.dropSt = drop ? S.dropSt + 1 : 0;
+    S.score += pop * (1 + Math.min(6, Math.max(0, S.popSt - 1))) + drop * (1 + Math.min(6, 2 * S.dropSt));
+  }
+  const LEFTOVER = 500; // cada burbuja que sobra al rescatar a todas las crías (GetLeftoverBubbleBasePointsBeforeMultiplier)
   function land(S, shot, cellRC, K, extra, hitRC) {
     const [r, c] = cellRC;
     ensureRows(S, r + 2);
@@ -386,7 +429,7 @@ const GAME = {
       const seen = new Set([hitRC[0] * 64 + hitRC[1]]); const st = [hitRC];
       while (st.length) { const [gr, gc] = st.pop(); toPop.set(gr * 64 + gc, [gr, gc]); for (const [nr, nc] of neighbors(gr, gc)) { const o = get(S, nr, nc); if (o && o.color === 'glass' && !seen.has(nr * 64 + nc)) { seen.add(nr * 64 + nc); st.push([nr, nc]); } } }
     }
-    if (shot.color === 'bomb') { K.boom(r, c, 1.7); add(circleCells(S, r, c, 1.7)); }
+    if (shot.color === 'bomb') { K.boom(r, c, 1.7, 'fire'); add(circleCells(S, r, c, 1.7)); }
     // Alcances exactos de Panda Pop (BubblePopLogicService, ver analisis/panda_pop.md §8)
     const has = (p) => powers.includes(p);
     const rowAt = (rr) => { if (rr < 0) return; K.wave(rr); for (let cc = 0; cc < colsIn(rr); cc++) if (get(S, rr, cc)) toPop.set(rr * 64 + cc, [rr, cc]); };
@@ -418,12 +461,12 @@ const GAME = {
     const n = ['fire', 'water', 'vine', 'sun'].filter(has).length;
     if (has('fire') && has('water') && n === 2) { for (let k = -2; k <= 2; k++) rowAt(r + k); } // "lava": 5 filas
     else {
-      if (has('fire')) { K.boom(r, c, 2); add(circleCells(S, r, c, 2.05)); } // hexágono de radio 2 (19)
+      if (has('fire')) { K.boom(r, c, 2, 'fire'); add(circleCells(S, r, c, 2.05)); } // hexágono de radio 2 (19)
       if (has('water')) {
         // solo la fila del impacto, como el original ("El agua despeja una fila entera de burbujas")
         rowAt(r); if (n >= 2) rowAt(r - 1); if (has('vine')) rowAt(r + 1);
       }
-      if (has('sun')) { K.boom(r, c, 1); add(circleCells(S, r, c, 1.05)); if (n >= 2) rays(n >= 3 ? 3 : has('fire') ? 2 : 1); }
+      if (has('sun')) { K.boom(r, c, 1, has('fire') ? 'sunfire' : n >= 2 ? 'sunburst' : 'sun'); add(circleCells(S, r, c, 1.05)); if (n >= 2) rays(n >= 3 ? 3 : has('fire') ? 2 : 1); }
       if (has('vine') && (has('water') || has('fire') || n >= 3)) { colAt(-1); colAt(1); }
     }
     if (extra && extra.length) add(extra); // casillas tocadas por la parra
@@ -550,8 +593,10 @@ const GAME = {
     let pandas = 0, extraShots = 0, death = false;
     const popped = [...toPop.values()];
     popped.sort((a, b) => Math.hypot(a[0] - r, a[1] - c) - Math.hypot(b[0] - r, b[1] - c));
+    const pts = { pop: 0, drop: 0 };
     popped.forEach(([rr, cc], i) => {
       const o = S.grid[rr][cc];
+      pts.pop += bubblePoints(o, false);
       S.grid[rr][cc] = null;
       if (o.panda) pandas++;
       if (o.color === 'ivy' || o.color === 'ivymom') S.ivyHit = true;
@@ -559,7 +604,7 @@ const GAME = {
       if (o.plus) extraShots += 2;
       if (o.baboon) extraShots -= 2;
       if (o.death) death = true;
-      K.pop(o, rr, cc, Math.min(0.6, i * 0.03));
+      const tmP = E.skin('timing'); K.pop(o, rr, cc, Math.min(tmP && tmP.popMax ? tmP.popMax : 0.6, i * (tmP && tmP.popStep ? tmP.popStep : 0.03)));
     });
     const seenIce = new Set();
     for (const [ir, ic, col] of iceConv) {
@@ -573,6 +618,7 @@ const GAME = {
       dropped = floating(S);
       dropped.forEach(([rr, cc]) => {
         const o = S.grid[rr][cc];
+        pts.drop += bubblePoints(o, true);
         S.grid[rr][cc] = null;
         if (o.panda) pandas++;
         if (o.plus) extraShots += 2;
@@ -581,6 +627,7 @@ const GAME = {
       });
     }
     if (shotColor !== null) addLantern(S, shotColor, FILL_SHOT);
+    scoreTurn(S, popped.length ? pts.pop : 0, dropped.length ? pts.drop : 0);
     return { popped: popped.length, dropped: dropped.length, pandas, extraShots, death };
   }
   // Recorrido de la parra: atraviesa burbujas abriendo camino hasta el techo
@@ -617,7 +664,7 @@ const GAME = {
 
   // ------------------------------------------------------------ generador y bot
   function buildState(spec, seed) {
-    const S = { colors: spec.colors, rand: E.rng(seed), lan: [0, 0, 0, 0], ghosts: [], shotN: 0 };
+    const S = { colors: spec.colors, rand: E.rng(seed), lan: [0, 0, 0, 0], ghosts: [], shotN: 0, score: 0, popSt: 0, dropSt: 0 };
     S.grid = spec.cells.map((row) => row.map((d) => (d ? Object.assign({ id: uid++ }, d) : null)));
     S.grid.forEach((row, r) => row.forEach((b, c) => { if (b && b.ghost && b.phase === 1) { S.ghosts.push({ r, c, b }); row[c] = null; } }));
     return S;
@@ -665,6 +712,7 @@ const GAME = {
       endShot(S, nullK);
       S.cur = nextColor(S);
     }
+    (spec.botScores || (spec.botScores = [])).push(S.score);
     return shots;
   }
 
@@ -680,18 +728,43 @@ const GAME = {
       if (spec.botMoves <= 34) break;
     }
     // en el original hay ~21 burbujas por nivel: margen justo para que suponga un reto
-    const factor = 1 - spec.d * 0.1; // el bot de calibración solo usa el fuego, juega peor que una persona
+    // el bot de calibración solo usa el fuego, juega peor que una persona (calibrado 23-10-2026: con 1 - d*0.1 ganaba ~85%)
+    const factor = 0.97 - spec.d * 0.1;
     spec.moves = E.clamp(Math.ceil(spec.botMoves * factor) + (n < 5 ? 5 : 1), 12, 55);
+    // estrellas por puntos (como los "stars" de cada nivel de Panda Pop): la primera la da rescatar a las crías
+    const bs = Math.max(...(spec.botScores || [0])), r10 = (v) => Math.max(10, Math.round(v / 10) * 10), babies = spec.goals[0].count * 500;
+    spec.starScores = [r10(Math.min(babies * 0.8, bs * 0.4)), r10(bs * 0.9), r10(bs * 1.35)];
     cache.set(n, spec);
     return spec;
   }
   GAME.makeLevel = (n) => (cache.has(n) ? cache.get(n) : E.runGen(levelG(n)));
   GAME.levelSteps = (n) => (cache.has(n) ? null : levelG(n));
+  // Tramos medidos en los 8 200 niveles reales de Panda Pop (tools/pp_niveles.py; ver analisis/pandapop_niveles.md):
+  // burbujas para disparar (p10 p25 p50 p75 p90), crías y filas (p25 p50 p75), niveles normal/difícil/superdifícil y frecuencia de cada obstáculo
+  const TRAMOS = [
+    {to:20,shots:[20,20,22,23,25],babies:[16,18,21],rows:[26,29,35],hard:[1,0,0],el:{super:0.25,glass:0.25,spike:0.25}},
+    {to:50,shots:[16,17,18,20,21],babies:[19,21,25],rows:[21,26,30],hard:[1,0,0],el:{super:0.5,fixed:0.43,rune:0.3,glass:0.23,spike:0.23}},
+    {to:100,shots:[18,19,20,21,24],babies:[16,19,22],rows:[22,26,32],hard:[1,0,0],el:{super:0.42,ice:0.34,glass:0.3,fixed:0.26,rune:0.2,spike:0.18}},
+    {to:200,shots:[18,20,23,24,26],babies:[18,22,34],rows:[26,29,36],hard:[0.94,0,0.06],el:{glass:0.26,morph:0.23,ice:0.31,spike:0.15,foam:0.13,rune:0.1,fixed:0.09,metal:0.08,super:0.04,chain:0.02,bamboo:0.01,rocket:0.01}},
+    {to:500,shots:[16,18,21,24,27],babies:[18,22,29],rows:[25,31,40],hard:[0.85,0.11,0.04],el:{ice:0.24,glass:0.16,super:0.13,morph:0.13,fixed:0.12,spike:0.11,metal:0.11,foam:0.1,rune:0.08,bamboo:0.07,chain:0.03,rev:0.02,gspike:0.02,rocket:0.01,volcano:0.01,swap:0.01}},
+    {to:1000,shots:[16,18,21,23,26],babies:[17,22,29],rows:[24,29,38],hard:[0.89,0.07,0.04],el:{balloon:0.01,ice:0.24,glass:0.17,morph:0.13,foam:0.12,spike:0.1,metal:0.1,fixed:0.09,rune:0.08,bamboo:0.07,super:0.07,rev:0.05,swap:0.03,chain:0.02,gspike:0.02,volcano:0.02,rocket:0.01}},
+    {to:1e9,shots:[14,16,19,21,24],babies:[17,22,29],rows:[24,29,37],hard:[0.9,0.06,0.04],el:{ice:0.23,glass:0.16,morph:0.13,spike:0.11,fixed:0.11,foam:0.1,super:0.09,metal:0.09,bamboo:0.08,rune:0.07,rev:0.04,gspike:0.03,swap:0.02,chain:0.02,volcano:0.02,rocket:0.02}},
+  ];
+  const tramo = (n) => TRAMOS.find((t) => n <= t.to);
+  // nivel en que Panda Pop estrena cada obstáculo (primera aparición en sus niveles; el hielo cuenta también las multigolpe).
+  // Los que no aparecen en sus niveles se dejan para más adelante, de vez en cuando
+  const INTRO = { super: 5, glass: 11, spike: 16, fixed: 31, rune: 41, ice: 51, foam: 101, morph: 102, bamboo: 105, metal: 120, rocket: 124, chain: 156, swap: 351,
+    balloon: 359, volcano: 410, rev: 429, gspike: 435, plus: 550, cloud: 600, cd: 650, ivy: 700, gift: 750, ghost: 800, drain: 850, dice: 900, baboon: 950, death: 1700, leaf: 1000, rope: 1050, rotator: 1100,
+    smoke: 1150, fan: 1200, bumper: 1250, shield: 1300, fairy: 1350, mask: 1400, charger: 1450, crystal: 1500, cannon: 1550, rock: 1600 };
+  const quant = (q, u) => { const x = u * (q.length - 1), i = Math.min(q.length - 2, Math.floor(x)); return q[i] + (q[i + 1] - q[i]) * (x - i); };
   function* genLevelG(n, attempt) {
     const rng = E.rng(n * 1597334677 + 9 + attempt * 3571);
     const d = E.difficulty(n) * Math.pow(0.8, attempt);
-    // tableros altos como en Panda Pop (mediana 24 filas): crecen con el nivel
-    const rows = n < 4 ? 9 : Math.round(11 + d * 12 + rng() * 3);
+    const T = tramo(n);
+    // cada obstáculo sale a partir del nivel en que lo estrena Panda Pop (ese nivel seguro) y luego con su frecuencia en el tramo
+    const on = (k) => n === INTRO[k] || (n > INTRO[k] && rng() < (T.el[k] != null ? T.el[k] : 0.03));
+    // tableros altos como en Panda Pop (filas de su tramo, hasta 32 para que la tablet los genere a tiempo)
+    const rows = n < 4 ? 9 : n < 10 ? 14 + n : Math.min(32, Math.round(quant(T.rows, rng())));
     const colors = n < 4 ? 4 : n < 30 ? 4 : d > 0.55 && rng() < 0.45 ? 6 : 5;
     const cells = [];
     const pat = n < 5 ? 0 : rng.int(5);
@@ -716,7 +789,7 @@ const GAME = {
       cells.push(row);
     }
     // crías: en el original ~15 por nivel, repartidas por el tablero
-    const want = n < 3 ? 4 : n < 8 ? 7 : Math.round(9 + d * 9 + rng() * 3);
+    const want = n < 3 ? 4 : n < 8 ? 7 : Math.round(quant(T.babies, rng()) * Math.min(1, rows / 28)); // las de su tramo (tableros más bajos, menos crías)
     const spots = [];
     for (let r = 0; r < rows; r++) for (let c = 0; c < colsIn(r); c++) if (cells[r][c]) spots.push([r, c]);
     rng.shuffle(spots);
@@ -731,101 +804,103 @@ const GAME = {
     // obstáculos de Panda Pop (cristal, metal, congeladas y pinchos)
     const free = () => { const out = []; for (let r = 0; r < rows; r++) for (let c = 0; c < colsIn(r); c++) { const b = cells[r][c]; if (b && !b.panda && typeof b.color === 'number' && !b.ice) out.push([r, c]); } return rng.shuffle(out); };
     let obsText = '';
-    if (n === 12 || (n > 12 && rng() < 0.4)) { // tiras de cristal
+    if (on('glass')) { // tiras de cristal
       const strips = 1 + Math.round(d * 2);
       for (let i = 0; i < strips; i++) {
         const r = rng.range(2, rows - 3), c0 = rng.int(Math.max(1, colsIn(r) - 4)), len = 3 + rng.int(4);
         for (let c = c0; c < Math.min(colsIn(r), c0 + len); c++) if (cells[r][c] && !cells[r][c].panda) cells[r][c] = { color: 'glass' };
       }
-      if (n === 12) obsText = 'Golpea el cristal con cualquier burbuja para romperlo';
+      if (n === INTRO.glass) obsText = 'Golpea el cristal con cualquier burbuja para romperlo';
     }
-    if (n === 18 || (n > 18 && rng() < 0.35)) { // metal: no se combina, hay que hacerlo caer
+    if (on('metal')) { // metal: no se combina, hay que hacerlo caer
       free().slice(0, 2 + Math.round(d * 4)).forEach(([r, c]) => { cells[r][c] = { color: 'metal' }; });
-      if (n === 18) obsText = 'Las burbujas de metal no se combinan: revienta las de alrededor para que caigan';
+      if (n === INTRO.metal) obsText = 'Las burbujas de metal no se combinan: revienta las de alrededor para que caigan';
     }
     // Frecuencias medidas en su tramo de Panda Pop (niveles 550–800 de la versión 15.7, numerados con LevelDecouplingTable):
     // hielo 19% (mediana 59 por nivel), cristal 17%, sorpresa 11%, espuma 10%, fijas 9%, pinchos 8%, bambú 7%, runas 6%,
     // sin color 6%, revólver 5%, superburbujas 5%, pinchos dorados 4%, volcanes 3%, intercambio 3%, cohetes 1%
-    const intro = (from, prob) => n === from || (n > from && rng() < prob);
     const at = ([r, c]) => cells[r][c];
     const late = n > 120; // a partir de aquí, mezcla como la de su tramo
     const band = (h) => { const r0 = rng.range(1, Math.max(2, rows - h - 2)); return free().filter(([r]) => r >= r0 && r < r0 + h); };
-    if (intro(24, late ? 0.22 : 0.3)) { // hielo (multigolpe): toma el color de lo que revienta a su lado
+    if (on('ice')) { // hielo (multigolpe): toma el color de lo que revienta a su lado
       const want = Math.round(free().length * (0.08 + d * 0.15));
       band(6 + Math.round(d * 4)).concat(free()).slice(0, want).forEach(([r, c]) => { if (typeof cells[r][c].color === 'number' && !cells[r][c].panda) cells[r][c] = { color: 'iceb' }; });
-      if (n === 24) obsText = 'Revienta burbujas junto al hielo y tomará su color';
+      if (n === INTRO.ice) obsText = 'Revienta burbujas junto al hielo y tomará su color';
     }
-    if (intro(30, late ? 0.08 : 0.25)) { // pinchos en la parte de arriba
+    if (on('spike')) { // pinchos en la parte de arriba
       free().filter(([r]) => r < rows * 0.6).slice(0, 2 + Math.round(d * 3)).forEach(([r, c]) => { cells[r][c] = { color: 'spike' }; });
-      if (n === 30) obsText = '¡Cuidado con los pinchos! La burbuja que los toca explota';
+      if (n === INTRO.spike) obsText = '¡Cuidado con los pinchos! La burbuja que los toca explota';
     }
     // burbujas "+" (36), mandril (42) y mortífera (48): en su tramo casi no salen
-    for (const [flag, from, prob, num] of [['plus', 36, late ? 0.03 : 0.3, 2], ['baboon', 42, late ? 0.03 : 0.25, 2], ['death', 48, late ? 0.02 : 0.2, 1 + Math.round(d * 2)]]) {
-      if (n === from || (n > from && rng() < prob)) {
+    // "+", mandril y mortífera: en el Panda Pop actual casi no salen (la mortífera la retiraron), así que van tarde y poco
+    for (const [flag, num] of [['plus', 2], ['baboon', 2], ['death', 1 + Math.round(d * 2)]]) {
+      if (on(flag)) {
         free().slice(0, num).forEach(([r, c]) => { cells[r][c][flag] = true; });
-        const tx = { 36: 'Revienta la burbuja "+" para conseguir 2 burbujas más', 42: 'No revientes las burbujas del mandril o te robará 2 burbujas', 48: '¡Cuidado! Si revientas la burbuja mortífera se acaba la ronda' };
-        if (n === from) obsText = tx[n];
+        const tx = { plus: 'Revienta la burbuja "+" para conseguir 2 burbujas más', baboon: 'No revientes las burbujas del mandril o te robará 2 burbujas', death: '¡Cuidado! Si revientas la burbuja mortífera se acaba la ronda' };
+        if (n === INTRO[flag]) obsText = tx[flag];
       }
     }
-    if (intro(54, late ? 0.1 : 0.25)) { free().filter(([r]) => r > 2).slice(0, 3 + Math.round(d * 10)).forEach((p) => { at(p).fixed = true; }); if (n === 54) obsText = 'Las burbujas fijas no caen nunca: sujetan a las de su alrededor'; }
-    if (intro(60, late ? 0.03 : 0.15)) { free().filter(([r]) => r > 3 && r < rows - 2).slice(0, 2 + Math.round(d * 2)).forEach(([r, c]) => { cells[r][c] = { color: 'cloud' }; }); if (n === 60) obsText = 'Las nubes sujetan burbujas: revienta algo a su lado y caerán las que toca'; }
-    if (intro(66, late ? 0.12 : 0.18)) { free().slice(0, 4 + Math.round(d * (late ? 25 : 6))).forEach((p) => { at(p).morph = true; }); if (n === 66) obsText = 'Las burbujas sorpresa ✨ cambian de color con cada disparo'; }
-    if (intro(72, late ? 0.03 : 0.15)) {
+    if (on('fixed')) { free().filter(([r]) => r > 2).slice(0, 3 + Math.round(d * 10)).forEach((p) => { at(p).fixed = true; }); if (n === INTRO.fixed) obsText = 'Las burbujas fijas sujetan a las de su alrededor'; }
+    // globos (desde el 359, como en Panda Pop): alrededor de 1 de cada 6 burbujas de color del nivel
+    if (on('balloon')) { const f = free().filter(([r, c]) => r > 1 && !cells[r][c].fixed && !cells[r][c].chain && !cells[r][c].lock && !cells[r][c].morph); f.slice(0, Math.max(6, Math.round(f.length * (0.1 + d * 0.1)))).forEach((p) => { at(p).balloon = true; }); if (n === INTRO.balloon) obsText = 'Los globos sujetan a las burbujas de su alrededor; si se quedan solos, se van volando'; }
+    if (on('cloud')) { free().filter(([r]) => r > 3 && r < rows - 2).slice(0, 2 + Math.round(d * 2)).forEach(([r, c]) => { cells[r][c] = { color: 'cloud' }; }); if (n === INTRO.cloud) obsText = 'Las nubes sujetan burbujas: revienta algo a su lado y caerán las que toca'; }
+    if (on('morph')) { free().slice(0, 4 + Math.round(d * (late ? 25 : 6))).forEach((p) => { at(p).morph = true; }); if (n === INTRO.morph) obsText = 'Las burbujas sorpresa ✨ cambian de color con cada disparo'; }
+    if (on('chain')) {
       const f = free().filter(([r]) => r > 1);
       const lockAt = f.find(([r]) => r > rows * 0.4);
       if (lockAt) { at(lockAt).lock = true; f.filter((p) => p !== lockAt && p[0] < lockAt[0]).slice(0, 4 + Math.round(d * 4)).forEach((p) => { at(p).chain = true; }); }
-      if (n === 72) obsText = 'Dale a la cerradura o hazla estallar para romper las cadenas';
+      if (n === INTRO.chain) obsText = 'Dale a la cerradura o hazla estallar para romper las cadenas';
     }
-    if (intro(78, late ? 0.07 : 0.15)) { free().filter(([r]) => r > 2).slice(0, 3 + Math.round(d * 12)).forEach(([r, c]) => { cells[r][c] = { color: 'rune' }; }); if (n === 78) obsText = 'Haz una combinación junto a una runa para crear una reacción en cadena'; }
-    if (intro(84, late ? 0.02 : 0.08)) { free().filter(([r]) => r > rows * 0.4).slice(0, 1 + (d > 0.6 ? 1 : 0)).forEach((p) => { at(p).cd = 3 + rng.int(4); }); if (n === 84) obsText = 'Revienta el barril antes de que llegue a 0: si no, su humo apagará los farolillos'; }
-    if (intro(90, late ? 0.08 : 0.12)) {
+    if (on('rune')) { free().filter(([r]) => r > 2).slice(0, 3 + Math.round(d * 12)).forEach(([r, c]) => { cells[r][c] = { color: 'rune' }; }); if (n === INTRO.rune) obsText = 'Haz una combinación junto a una runa para crear una reacción en cadena'; }
+    if (on('cd')) { free().filter(([r]) => r > rows * 0.4).slice(0, 1 + (d > 0.6 ? 1 : 0)).forEach((p) => { at(p).cd = 3 + rng.int(4); }); if (n === INTRO.cd) obsText = 'Revienta el barril antes de que llegue a 0: si no, su humo apagará los farolillos'; }
+    if (on('bamboo')) {
       const r = rng.range(3, rows - 3);
       for (let c = 0; c < colsIn(r); c++) if (cells[r][c] && !cells[r][c].panda && (c % 3 !== 1)) cells[r][c] = { color: 'bamboo', hp: d > 0.5 ? 3 : 2 };
-      if (n === 90) obsText = 'El bambú aguanta varios golpes: revienta burbujas a su lado';
+      if (n === INTRO.bamboo) obsText = 'El bambú aguanta varios golpes: revienta burbujas a su lado';
     }
-    if (intro(96, late ? 0.06 : 0.1)) { const p = free().find(([r, c]) => r > 2 && r < rows - 2 && c > 0 && c < colsIn(r) - 1); if (p) cells[p[0]][p[1]] = { color: 'rev' }; if (n === 96) obsText = 'El revólver 🌀 gira las burbujas de su alrededor en cada disparo'; }
-    if (intro(102, late ? 0.02 : 0.1)) { const p = free().find(([r]) => r > 2 && r < rows * 0.5); if (p) cells[p[0]][p[1]] = { color: 'ivymom' }; if (n === 102) obsText = 'La hiedra venenosa crece en cada disparo si no la rompes'; }
-    if (intro(108, late ? 0.03 : 0.1)) { free().filter(([r]) => r > 2).slice(0, 1 + (d > 0.5 ? 1 : 0)).forEach(([r, c]) => { cells[r][c] = { color: 'gift' }; }); if (n === 108) obsText = 'Revienta algo junto al regalo y dentro aparecerá una superburbuja'; }
-    if (intro(114, late ? 0.02 : 0.1)) { free().filter(([r]) => r > 2 && r < rows - 2).slice(0, 2).forEach(([r, c]) => { cells[r][c] = { color: 'rocketo', dir: rng.pick([0, 3, 4, 5]) }; }); if (n === 114) obsText = 'Dale al cohete y saldrá volando hasta explotar contra las burbujas'; }
-    if (intro(120, late ? 0.03 : 0.1)) { // fantasmas: dos grupos que se turnan
+    if (on('rev')) { const p = free().find(([r, c]) => r > 2 && r < rows - 2 && c > 0 && c < colsIn(r) - 1); if (p) cells[p[0]][p[1]] = { color: 'rev' }; if (n === INTRO.rev) obsText = 'El revólver 🌀 gira las burbujas de su alrededor en cada disparo'; }
+    if (on('ivy')) { const p = free().find(([r]) => r > 2 && r < rows * 0.5); if (p) cells[p[0]][p[1]] = { color: 'ivymom' }; if (n === INTRO.ivy) obsText = 'La hiedra venenosa crece en cada disparo si no la rompes'; }
+    if (on('gift')) { free().filter(([r]) => r > 2).slice(0, 1 + (d > 0.5 ? 1 : 0)).forEach(([r, c]) => { cells[r][c] = { color: 'gift' }; }); if (n === INTRO.gift) obsText = 'Revienta algo junto al regalo y dentro aparecerá una superburbuja'; }
+    if (on('rocket')) { free().filter(([r]) => r > 2 && r < rows - 2).slice(0, 2).forEach(([r, c]) => { cells[r][c] = { color: 'rocketo', dir: rng.pick([0, 3, 4, 5]) }; }); if (n === INTRO.rocket) obsText = 'Dale al cohete y saldrá volando hasta explotar contra las burbujas'; }
+    if (on('ghost')) { // fantasmas: dos grupos que se turnan
       free().slice(0, 4 + Math.round(d * 6)).forEach((p, i) => { at(p).ghost = true; at(p).phase = i % 2; });
-      if (n === 120) obsText = 'Las burbujas fantasma 👻 se turnan: las transparentes se pueden atravesar';
+      if (n === INTRO.ghost) obsText = 'Las burbujas fantasma 👻 se turnan: las transparentes se pueden atravesar';
     }
-    if (intro(126, 0.1)) { // espuma: la burbuja la atraviesa abriéndose camino
+    if (on('foam')) { // espuma: la burbuja la atraviesa abriéndose camino
       band(3 + Math.round(d * 3)).forEach(([r, c]) => { cells[r][c] = { color: 'foam' }; });
-      if (n === 126) obsText = 'Las burbujas atraviesan la espuma y la van quitando a su paso';
+      if (n === INTRO.foam) obsText = 'Las burbujas atraviesan la espuma y la van quitando a su paso';
     }
-    if (intro(132, 0.05)) { // pinchos dorados: se encienden y se apagan en cada disparo
+    if (on('gspike')) { // pinchos dorados: se encienden y se apagan en cada disparo
       free().filter(([r]) => r < rows * 0.7).slice(0, 4 + Math.round(d * 10)).forEach(([r, c], i) => { cells[r][c] = { color: 'gspike', on: i % 2 === 0 }; });
-      if (n === 132) obsText = 'Los pinchos dorados solo pinchan cuando están encendidos: se turnan en cada disparo';
+      if (n === INTRO.gspike) obsText = 'Los pinchos dorados solo pinchan cuando están encendidos: se turnan en cada disparo';
     }
-    if (intro(138, 0.06)) { // superburbujas ya colocadas: se activan al dispararles o al reventar algo a su lado
+    if (on('super')) { // superburbujas ya colocadas: se activan al dispararles o al reventar algo a su lado
       free().slice(0, 2 + Math.round(d * 3)).forEach(([r, c]) => { cells[r][c] = { color: rng.pick(['sfire', 'sfire', 'swater', 'svine', 'ssun']) }; });
-      if (n === 138) obsText = 'Las superburbujas explotan cuando les das: 🔥 en círculo, 🌊 su fila, 🌿 su columna y ☀️ alrededor';
+      if (n === INTRO.super) obsText = 'Las superburbujas explotan cuando les das: 🔥 en círculo, 🌊 su fila, 🌿 su columna y ☀️ alrededor';
     }
-    if (intro(144, 0.04)) { free().filter(([r]) => r > rows * 0.5).slice(0, 2 + (d > 0.5 ? 2 : 0)).forEach(([r, c]) => { cells[r][c] = { color: 'volcano' }; }); if (n === 144) obsText = 'Revienta algo junto al volcán y entrará en erupción hacia arriba'; }
-    if (intro(150, 0.04)) { // intercambiadoras: se cambian el color con la de su derecha en cada disparo
+    if (on('volcano')) { free().filter(([r]) => r > rows * 0.5).slice(0, 2 + (d > 0.5 ? 2 : 0)).forEach(([r, c]) => { cells[r][c] = { color: 'volcano' }; }); if (n === INTRO.volcano) obsText = 'Revienta algo junto al volcán y entrará en erupción hacia arriba'; }
+    if (on('swap')) { // intercambiadoras: se cambian el color con la de su derecha en cada disparo
       let k = 0;
       for (const [r, c] of free()) { if (k >= 2 + Math.round(d * 2)) break; const o = cells[r][c + 1]; if (c + 1 < colsIn(r) && o && typeof o.color === 'number' && !o.panda && !cells[r][c].swapR) { cells[r][c].swapR = true; k++; } }
-      if (n === 150) obsText = 'Las burbujas con flechas 🔁 se intercambian con la de al lado en cada disparo';
+      if (n === INTRO.swap) obsText = 'Las burbujas con flechas 🔁 se intercambian con la de al lado en cada disparo';
     }
-    if (intro(156, 0.02)) { free().slice(0, 1 + (d > 0.6 ? 1 : 0)).forEach(([r, c]) => { cells[r][c] = { color: 'drain' }; }); if (n === 156) obsText = 'Si revientas una burbuja apagadora 🚫, se apagan los farolillos'; }
+    if (on('drain')) { free().slice(0, 1 + (d > 0.6 ? 1 : 0)).forEach(([r, c]) => { cells[r][c] = { color: 'drain' }; }); if (n === INTRO.drain) obsText = 'Si revientas una burbuja apagadora 🚫, se apagan los farolillos'; }
     // los que en su tramo salen en ≤1% de los niveles
-    const rare = (from, prob, fn, tx) => { if (intro(from, late ? prob : 0.12)) { fn(); if (n === from) obsText = tx; } };
-    rare(168, 0.02, () => band(2 + Math.round(d * 2)).forEach((p) => { at(p).leaf = true; }), 'Las hojas tapan las burbujas: revienta algo a su lado para que se caigan');
-    rare(174, 0.015, () => band(2 + Math.round(d * 2)).filter((p) => !at(p).panda).forEach((p, i) => { at(p).rope = i % 3 === 0 ? 2 : 1; }), 'Las cuerdas sujetan burbujas: haz estallar una atada para aflojarlas');
-    rare(180, 0.01, () => free().filter(([r, c]) => r > 1 && r < rows - 2 && c > 0 && c < colsIn(r) - 1).slice(0, 1 + (d > 0.5 ? 1 : 0)).forEach((p) => { at(p).rot = true; }), 'La burbuja con flechas 🔄 hace girar a las de su alrededor en cada disparo');
-    rare(186, 0.02, () => free().filter(([r]) => r > 2).slice(0, 1 + (d > 0.5 ? 1 : 0)).forEach(([r, c]) => { cells[r][c] = { color: 'smoke', on: true, big: d > 0.6 }; }), 'El humo 💨 tapa los colores un disparo sí y otro no');
-    rare(192, 0.01, () => free().filter(([r]) => r > 3).slice(0, 2).forEach(([r, c]) => { cells[r][c] = { color: 'fan', dir: c < colsIn(r) / 2 ? 1 : -1, on: true, perma: rng() < 0.5 }; }), 'El ventilador sopla de lado la burbuja que le da');
-    rare(198, 0.01, () => free().filter(([r]) => r > 3).slice(0, 2 + (d > 0.5 ? 1 : 0)).forEach(([r, c]) => { cells[r][c] = { color: 'bumper' }; }), 'Las burbujas parachoques hacen rebotar cualquier burbuja que les lances');
-    rare(204, 0.01, () => free().slice(0, 2 + (d > 0.5 ? 2 : 0)).forEach((p) => { at(p).shield = rng.int(6); }), 'El escudo gira: revienta o lanza por su hueco abierto para quitarlo');
-    rare(210, 0.01, () => free().filter(([r]) => r > rows * 0.4).slice(0, 1).forEach(([r, c]) => { cells[r][c] = { color: 'fairy' }; }), 'Dale al hada 🧚 y volará a liberar crías');
-    rare(216, 0.01, () => free().slice(0, 3 + Math.round(d * 4)).forEach((p) => { at(p).mask = true; }), 'Las burbujas con máscara 🎭 necesitan estallar dos veces');
-    rare(222, 0.01, () => free().filter(([r, c]) => cells[r][c].color < 4).slice(0, 2).forEach((p) => { at(p).charger = true; }), 'Revienta la burbuja con la ✕ y su farolillo se llenará del todo');
-    rare(228, 0.01, () => free().slice(0, 2 + (d > 0.5 ? 2 : 0)).forEach((p) => { at(p).crystal = true; }), 'Al combinar los cristales, lo de alrededor se vuelve cristal; cambian de color si les da otra burbuja');
-    rare(234, 0.01, () => free().filter(([r]) => r > 3 && r < rows - 2).slice(0, 1 + (d > 0.5 ? 1 : 0)).forEach(([r, c]) => { cells[r][c] = { color: 'cannon', dir: rng.pick([0, 3, 4, 5]) }; }), 'Dale al cañón y disparará una burbuja en su dirección');
-    rare(240, 0.01, () => free().slice(0, 2 + (d > 0.5 ? 2 : 0)).forEach(([r, c]) => { cells[r][c] = { color: 'rock' }; }), 'Dale a la roca 🪨 con una burbuja y se volverá de color');
-    if (intro(162, 0.03)) { free().slice(0, 2 + (d > 0.5 ? 1 : 0)).forEach((p) => { at(p).dice = true; }); if (n === 162) obsText = 'El dado cambia de color si le da una burbuja de otro color'; }
+    const rare = (k, fn, tx) => { if (on(k)) { fn(); if (n === INTRO[k]) obsText = tx; } };
+    rare('leaf', () => band(2 + Math.round(d * 2)).forEach((p) => { at(p).leaf = true; }), 'Las hojas tapan las burbujas: revienta algo a su lado para que se caigan');
+    rare('rope', () => band(2 + Math.round(d * 2)).filter((p) => !at(p).panda).forEach((p, i) => { at(p).rope = i % 3 === 0 ? 2 : 1; }), 'Las cuerdas sujetan burbujas: haz estallar una atada para aflojarlas');
+    rare('rotator', () => free().filter(([r, c]) => r > 1 && r < rows - 2 && c > 0 && c < colsIn(r) - 1).slice(0, 1 + (d > 0.5 ? 1 : 0)).forEach((p) => { at(p).rot = true; }), 'La burbuja con flechas 🔄 hace girar a las de su alrededor en cada disparo');
+    rare('smoke', () => free().filter(([r]) => r > 2).slice(0, 1 + (d > 0.5 ? 1 : 0)).forEach(([r, c]) => { cells[r][c] = { color: 'smoke', on: true, big: d > 0.6 }; }), 'El humo 💨 tapa los colores un disparo sí y otro no');
+    rare('fan', () => free().filter(([r]) => r > 3).slice(0, 2).forEach(([r, c]) => { cells[r][c] = { color: 'fan', dir: c < colsIn(r) / 2 ? 1 : -1, on: true, perma: rng() < 0.5 }; }), 'El ventilador sopla de lado la burbuja que le da');
+    rare('bumper', () => free().filter(([r]) => r > 3).slice(0, 2 + (d > 0.5 ? 1 : 0)).forEach(([r, c]) => { cells[r][c] = { color: 'bumper' }; }), 'Las burbujas parachoques hacen rebotar cualquier burbuja que les lances');
+    rare('shield', () => free().slice(0, 2 + (d > 0.5 ? 2 : 0)).forEach((p) => { at(p).shield = rng.int(6); }), 'El escudo gira: revienta o lanza por su hueco abierto para quitarlo');
+    rare('fairy', () => free().filter(([r]) => r > rows * 0.4).slice(0, 1).forEach(([r, c]) => { cells[r][c] = { color: 'fairy' }; }), 'Dale al hada 🧚 y volará a liberar crías');
+    rare('mask', () => free().slice(0, 3 + Math.round(d * 4)).forEach((p) => { at(p).mask = true; }), 'Las burbujas con máscara 🎭 necesitan estallar dos veces');
+    rare('charger', () => free().filter(([r, c]) => cells[r][c].color < 4).slice(0, 2).forEach((p) => { at(p).charger = true; }), 'Revienta la burbuja con la ✕ y su farolillo se llenará del todo');
+    rare('crystal', () => free().slice(0, 2 + (d > 0.5 ? 2 : 0)).forEach((p) => { at(p).crystal = true; }), 'Al combinar los cristales, lo de alrededor se vuelve cristal; cambian de color si les da otra burbuja');
+    rare('cannon', () => free().filter(([r]) => r > 3 && r < rows - 2).slice(0, 1 + (d > 0.5 ? 1 : 0)).forEach(([r, c]) => { cells[r][c] = { color: 'cannon', dir: rng.pick([0, 3, 4, 5]) }; }), 'Dale al cañón y disparará una burbuja en su dirección');
+    rare('rock', () => free().slice(0, 2 + (d > 0.5 ? 2 : 0)).forEach(([r, c]) => { cells[r][c] = { color: 'rock' }; }), 'Dale a la roca 🪨 con una burbuja y se volverá de color');
+    if (on('dice')) { free().slice(0, 2 + (d > 0.5 ? 1 : 0)).forEach((p) => { at(p).dice = true; }); if (n === INTRO.dice) obsText = 'El dado cambia de color si le da una burbuja de otro color'; }
     const goals = [{ type: 'panda', count: placed }];
     let text = obsText;
     if (n === 1) text = 'Arrastra el dedo para apuntar y suéltalo para lanzar';
@@ -853,7 +928,7 @@ const GAME = {
   // ------------------------------------------------------------ partida
   GAME.newPlay = function (spec) {
     const S = buildState(spec, E.playSeed != null ? E.playSeed : (Math.random() * 1e9) | 0);
-    const P = { S, busy: false };
+    const P = { S, busy: false, score: 0 };
     let area = { x: 10, y: 180, w: BW, h: BH };
     let k = 1, ox = 0, oy = 0;
     let scroll = 0, scrollTarget = 0;
@@ -866,27 +941,28 @@ const GAME = {
     const effects = [];
     const falling = [];
     const parachutes = [];
+    const rescued = []; // crías ya a salvo junto a mamá panda (dibujo de WebGL)
     const beams = [];
     const lanAnim = [0, 0, 0, 0];
 
     const sx = (x) => ox + x * k;
     const sy = (y) => oy + (y - scroll) * k;
     const viewH = () => area.h / k;
-    const shooterXY = () => [BW / 2, scroll + viewH() - 52];
+    const shooterXY = () => [BW / 2, scroll + viewH() - 52 - lift()];
 
     P.layout = function (a) {
       area = a;
       k = Math.min(a.w / BW, 1.2);
       ox = a.x + (a.w - BW * k) / 2;
       oy = a.y;
-      scrollTarget = scroll = scrollFor(S);
+      scrollTarget = scroll = scrollFor(S, viewH());
     };
 
     function curBubble() {
       if (S.power) return { color: S.power.length >= 4 ? 'dragon' : S.power.length > 1 ? 'fire' : S.power[0], powers: S.power.length >= 4 ? ['dragon'] : S.power.slice() };
       return { color: S.curSpecial || S.cur };
     }
-    function nextXY() { const [x, y] = shooterXY(); return [x - D * 2.4, y + D * 0.3]; }
+    function nextXY() { const [x, y] = shooterXY(); return [x - D * (E.skin('nextGap') || 2.4), y + D * 0.3]; }
     // posiciones de los farolillos en pantalla (como en Panda Pop: fuego y parra a la izquierda, sol y agua a la derecha)
     function lanternXY(i) {
       const [x0, y0] = shooterXY();
@@ -944,6 +1020,7 @@ const GAME = {
       return E.clamp(Math.atan2(dy, dx), -Math.PI + 0.12, -0.12);
     }
     function fire(ang) {
+      P.lastShot = { ang, t: E.t }; // para la animación de lanzar del estilo
       const [x0, y0] = shooterXY();
       const b = curBubble();
       const powers = b.powers || [];
@@ -981,10 +1058,11 @@ const GAME = {
       },
       drop(b, r, c) {
         const [x, y] = bxy(r, c);
-        falling.push({ b, x, y, vy: -150 - Math.random() * 150, vx: (Math.random() - 0.5) * 120, t: 0 });
+        // el globo se va volando hacia arriba (BalloonBubbleDisplay.StartFloat: acelera hasta salir)
+        falling.push({ b, x, y, vy: b.balloon ? -60 : -150 - Math.random() * 150, vx: (Math.random() - 0.5) * (b.balloon ? 30 : 120), t: 0, up: !!b.balloon });
         if (b.panda) freePanda(x, y);
       },
-      boom(r, c, rad) { const [x, y] = bxy(r, c); effects.push({ x, y, t: 0, kind: 'boom', rad }); E.sfx('bomb'); E.shake(0.3); },
+      boom(r, c, rad, pw) { const [x, y] = bxy(r, c); effects.push({ x, y, t: 0, kind: 'boom', rad, pw }); E.sfx('bomb'); E.shake(0.3); },
       wave(r) { const [, y] = bxy(r, 0); effects.push({ x: BW / 2, y, t: 0, kind: 'wave' }); },
       beam(pts) { beams.push({ pts, t: 0 }); },
       dragon() { effects.push({ x: BW / 2, y: 0, t: 0, kind: 'dragon' }); E.sfx('magic'); E.shake(0.6); },
@@ -1000,6 +1078,10 @@ const GAME = {
         const p = parachutes.shift();
         const px = p ? sx(p.x + Math.sin(p.t * 3 + p.sway) * 10) : sx(x);
         const py = p ? sy(p.y) : sy(y);
+        if (p) { // como en Panda Pop: la cría baja hasta el suelo, junto a mamá panda, y se queda allí (lo dibuja WebGL)
+          const n = rescued.length, side = n % 2 ? -1 : 1, col = Math.floor(n / 2) % 4, row = Math.floor(n / 8);
+          rescued.push({ x0: px, y0: py, gx: side * (1.6 + col * 0.55 + row * 0.25), gy: row * 0.25, t0: E.t });
+        }
         E.goal('panda', undefined, 1, px, py);
       });
     }
@@ -1025,7 +1107,8 @@ const GAME = {
       if (b.panda) return 'Cría de panda: revienta o tira su burbuja para rescatarla';
       if (b.chain) return 'Cadena: dale a la cerradura o hazla estallar para romperla';
       if (b.lock) return 'Cerradura: dale o hazla estallar y se romperán las cadenas';
-      if (b.fixed) return 'Burbuja fija: no cae nunca y sujeta a las de su alrededor';
+      if (b.fixed) return 'Burbuja fija: sujeta a las de su alrededor; si se queda sola, cae';
+      if (b.balloon) return 'Globo: sujeta a las burbujas de su alrededor; si se queda solo, se va volando';
       if (b.morph) return 'Burbuja sorpresa: cambia de color con cada disparo';
       if (b.cd != null) return 'Barril: revientalo antes de que llegue a 0 o apagará los farolillos';
       if (b.plus) return 'Burbuja +: revientala y tendrás 2 burbujas más';
@@ -1070,13 +1153,14 @@ const GAME = {
       let busy = false;
       if (shot) {
         busy = true;
-        shot.d += dt * 1500;
+        const tmS = E.skin('timing'); shot.d += dt * (tmS && tmS.shot ? tmS.shot * D : 1500); // el estilo puede dar la velocidad del original (diámetros/s)
         if (shot.d >= shot.len) {
           const res = land(S, shot.b, shot.cellRC, K, shot.extra, shot.hit);
+          P.score = S.score;
           if (res.extraShots) { P.moves = Math.max(0, P.moves + res.extraShots); E.floatText(E.W / 2, area.y + area.h * 0.6, (res.extraShots > 0 ? '+' : '') + res.extraShots + ' burbujas', res.extraShots > 0 ? '#7CFC00' : '#ff5050', 40); }
           if (res.death) { P.dead = true; P.deadMsg = '¡Has reventado la burbuja mortífera!'; }
           if (!res.popped && typeof shot.b.color === 'number') E.sfx('land', 1.4);
-          if (res.dropped >= 4) E.floatText(E.W / 2, area.y + area.h * 0.5, res.dropped >= 10 ? '¡Increíble!' : '¡Muy bien!', '#fff', 46);
+          if (res.dropped >= 6) E.floatText(E.W / 2, area.y + 70, res.dropped >= 12 ? '¡Increíble!' : '¡Muy bien!', '#fff', 42); // arriba, para no tapar las burbujas
           shot = null;
           endShot(S, K);
           const cols = presentColors(S);
@@ -1086,18 +1170,18 @@ const GAME = {
       }
       for (let i = effects.length - 1; i >= 0; i--) {
         effects[i].t += dt;
-        const lim = effects[i].kind === 'dragon' ? 1.2 : 0.4;
+        const lim = effects[i].kind === 'dragon' ? 1.2 : effects[i].kind === 'boom' || effects[i].kind === 'wave' ? 0.75 : 0.4; // los efectos de Panda Pop duran ~0,7 s (22–27 fotogramas a 30)
         if (effects[i].t > lim) effects.splice(i, 1); else busy = true;
       }
       for (let i = falling.length - 1; i >= 0; i--) {
         const f = falling[i];
-        f.t += dt; f.vy += 1400 * dt; f.y += f.vy * dt; f.x += f.vx * dt;
+        f.t += dt; f.vy += (f.up ? -900 : 1400) * dt; f.y += f.vy * dt; f.x += f.vx * dt;
         if (f.t > 1.2) falling.splice(i, 1); else busy = true;
       }
       for (const p of parachutes) { p.t += dt; p.y += 90 * dt; }
       for (let i = beams.length - 1; i >= 0; i--) { beams[i].t += dt; if (beams[i].t > 0.5) beams.splice(i, 1); }
       for (let i = 0; i < 4; i++) lanAnim[i] += (S.lan[i] - lanAnim[i]) * Math.min(1, dt * 5);
-      scrollTarget = scrollFor(S);
+      scrollTarget = scrollFor(S, viewH());
       if (Math.abs(scroll - scrollTarget) > 0.5) { scroll += (scrollTarget - scroll) * Math.min(1, dt * 3); busy = true; }
       else scroll = scrollTarget;
       if (hint) hint.t += dt;
@@ -1146,6 +1230,9 @@ const GAME = {
         g.beginPath(); g.arc(x, y, w * 0.85, 0, 7);
         g.fillStyle = 'rgba(255,240,150,0.45)'; g.fill();
       }
+      // el estilo puede dibujar el farolillo entero (p. ej. con las imágenes de Panda Pop)
+      const skl = E.skin('lantern');
+      if (skl && skl(g, i, x, y, w, h, lanAnim[i], full, active)) { g.restore(); if (full && !active) E.text(g, '¡Toca!', x, y - h / 2 - 20, 18, '#fff', { stroke: E.shade(COLORS[L.color], -0.4), sw: 5 }); return; }
       // cuerda
       g.strokeStyle = '#6b4a2b'; g.lineWidth = 3;
       g.beginPath(); g.moveTo(x, y - h / 2 - 10); g.lineTo(x, y - h / 2); g.stroke();
@@ -1167,17 +1254,26 @@ const GAME = {
       if (full && !active) E.text(g, '¡Toca!', x, y - h / 2 - 20, 18, '#fff', { stroke: E.shade(COLORS[L.color], -0.4), sw: 5 });
     }
 
+    // lo que necesita el dibujo con WebGL (games/burbujas/gl.js): fondo, mamá panda, burbujas con sus crías, reventones
+    // y crías en paracaídas; lo demás sigue en P.draw
+    P.glState = () => ({ S, size: D * k, lanternXY, power: S.power, shot: !!shot, area, sx, sy, bxy, colsIn, drawBubble, isBaby: (b) => !!b.panda, effects, parachutes, rescued, fin, shooter: (() => { const [x, y] = shooterXY(); return [sx(x), sy(y)]; })(),
+      ang: aim && !shot ? aimAngle() : pendingAng, lastShot: P.lastShot, moves: P.moves, lan: S.lan, lanAnim, cur: curBubble(), next: S.next,
+      nextXY: (() => { const [x, y] = nextXY(); return [sx(x), sy(y)]; })(),
+      shotAt: shot ? (() => { const [x, y] = pathPoint(shot.pts, shot.d); return { b: shot.b, x: sx(x), y: sy(y), vine: shot.vine ? (() => { const pts = []; for (let dd = 0; dd < shot.d; dd += 10) { const [vx, vy] = pathPoint(shot.pts, dd); pts.push(sx(vx), sy(vy)); } return pts; })() : null }; })() : null });
     P.draw = function (g) {
       const size = D * k;
+      const glOn = !!(window.GL && GL.on && GL.on()); // con WebGL, el fondo, mamá panda, las burbujas, los reventones y los paracaídas van allí
       g.save();
       const skbd = E.skin('board');
-      if (skbd) skbd(g, area);
+      if (glOn) { /* nada */ } else if (skbd) skbd(g, area);
       else { E.rr(g, area.x - 2, area.y - 6, area.w + 4, area.h + 8, 18); g.fillStyle = 'rgba(255,255,255,0.25)'; g.fill(); }
+      const skL0 = E.skin('launcher');
+      if (skL0 && !glOn) { const [lx, ly] = shooterXY(); skL0(g, sx(lx), sy(ly), size, { ang: aim && !shot ? aimAngle() : pendingAng, shot: P.lastShot, moves: P.moves }); }
       g.beginPath(); g.rect(area.x - 2, area.y - 6, area.w + 4, area.h + 8); g.clip();
       if (scroll < 2) { g.fillStyle = 'rgba(90,70,200,0.5)'; g.fillRect(area.x, sy(0) - 6, area.w, 6); }
-      for (let r = 0; r < S.grid.length; r++) {
+      for (let r = 0; r < S.grid.length && !glOn; r++) {
         const yy = sy(bxy(r, 0)[1]);
-        if (yy < area.y - size || yy > area.y + area.h + size) continue;
+        if (yy < area.y + size * 0.4 || yy > area.y + area.h + size) continue; // solo filas enteras: la que queda por encima del borde no asoma
         for (let c = 0; c < colsIn(r); c++) {
           const b = S.grid[r][c];
           if (!b) continue;
@@ -1194,7 +1290,13 @@ const GAME = {
       for (const e of effects) {
         if (e.t < 0) { if (e.b) drawBubble(g, e.b, sx(e.x), sy(e.y), size); continue; }
         const kk = Math.min(1, e.t / 0.35);
-        if (e.kind === 'pop') { const o = e.b.sc; e.b.sc = 1 + kk * 0.4; e.b.alpha = 1 - kk; drawBubble(g, e.b, sx(e.x), sy(e.y), size); e.b.sc = o; e.b.alpha = 1; }
+        if (e.kind === 'pop') {
+          if (glOn) continue; // el reventón de Panda Pop lo dibuja WebGL
+          const skP = E.skin('popFx'); // el estilo puede dibujar el reventón del original (salpicadura de su color)
+          if (skP && skP(g, e.b, sx(e.x), sy(e.y), size, e.t, drawBubble)) continue;
+          const o = e.b.sc; e.b.sc = 1 + kk * 0.4; e.b.alpha = 1 - kk; drawBubble(g, e.b, sx(e.x), sy(e.y), size); e.b.sc = o; e.b.alpha = 1;
+        }
+        else if (glOn && (e.kind === 'boom' || e.kind === 'wave' || e.kind === 'dragon')) continue; // los de Panda Pop los dibuja WebGL
         else if (e.kind === 'boom') { g.beginPath(); g.arc(sx(e.x), sy(e.y), size * (0.5 + kk * (e.rad || 2)), 0, 7); g.fillStyle = 'rgba(255,140,60,' + (0.7 - kk * 0.7) + ')'; g.fill(); }
         else if (e.kind === 'wave') { g.fillStyle = 'rgba(80,170,255,' + (0.7 - kk * 0.7) + ')'; g.fillRect(area.x, sy(e.y) - size * 0.6, area.w * kk, size * 1.2); }
         else if (e.kind === 'dragon') {
@@ -1208,10 +1310,10 @@ const GAME = {
         g.beginPath(); bm.pts.forEach(([x, y], i) => (i ? g.lineTo(sx(x), sy(y)) : g.moveTo(sx(x), sy(y)))); g.stroke(); g.restore();
       }
       for (const f of falling) { f.b.alpha = Math.max(0, 1 - f.t / 1.2); drawBubble(g, f.b, sx(f.x), sy(f.y), size); f.b.alpha = 1; }
-      for (const p of parachutes) {
+      for (const p of (glOn ? [] : parachutes)) {
         const x = sx(p.x + Math.sin(p.t * 3 + p.sway) * 10), y = sy(p.y);
-        E.emoji(g, '🪂', x, y - size * 0.7, size * 0.9);
-        E.emoji(g, '🐼', x, y, size * 0.8);
+        const skP = E.skin('parachute'); // el estilo puede dibujar la cría animada bajando en paracaídas
+        if (!(skP && skP(g, x, y, size, p.t))) { E.emoji(g, '🪂', x, y - size * 0.7, size * 0.9); E.emoji(g, '🐼', x, y, size * 0.8); }
       }
       if (aim && !shot) { const ang = aimAngle(); if (ang != null) drawAim(g, ang, 0.95); }
       else if (pendingAng != null && !shot) {
@@ -1222,20 +1324,26 @@ const GAME = {
       else if (hint && !shot && hint.t < 3) drawAim(g, hint.ang, 0.5 + Math.sin(hint.t * 6) * 0.3);
       // lanzador: mamá panda con la burbuja
       const [x0, y0] = shooterXY();
-      E.emoji(g, '🐼', sx(x0), sy(y0) + size * 0.95, size * 1.6);
-      g.beginPath(); g.arc(sx(x0), sy(y0), size * 0.72, 0, 7);
-      g.fillStyle = 'rgba(255,255,255,0.7)'; g.fill();
-      g.lineWidth = 4; g.strokeStyle = S.power ? '#ffd23f' : '#5a4bd1'; g.stroke();
-      if (!shot) drawBubble(g, curBubble(), sx(x0), sy(y0), size * 1.05);
+      // mamá panda: si el estilo la dibuja (animada, al principio de P.draw y sin recortar), aquí no
+      if (!E.skin('launcher')) E.emoji(g, '🐼', sx(x0), sy(y0) + size * 0.95, size * 1.6);
+      if (!E.skin('launcher')) { // aro del lanzador (con mamá panda animada no: la burbuja va en sus manos)
+        g.beginPath(); g.arc(sx(x0), sy(y0), size * 0.72, 0, 7);
+        g.fillStyle = 'rgba(255,255,255,0.7)'; g.fill();
+        g.lineWidth = 4; g.strokeStyle = S.power ? '#ffd23f' : '#5a4bd1'; g.stroke();
+      } else if (S.power && !glOn) { g.beginPath(); g.arc(sx(x0), sy(y0), size * 0.72, 0, 7); g.lineWidth = 4; g.strokeStyle = '#ffd23f'; g.stroke(); }
+      if (!shot && !glOn) drawBubble(g, curBubble(), sx(x0), sy(y0), size * 1.05); // con WebGL, la burbuja, el cesto, los farolillos y el tiro van allí
       // cesta con la siguiente y número de burbujas
       const [nx, ny] = nextXY();
-      E.rr(g, sx(nx) - size * 0.8, sy(ny) - size * 0.55, size * 1.6, size * 1.1, 12);
-      g.fillStyle = 'rgba(150,100,50,0.85)'; g.fill();
-      drawBubble(g, { color: S.next }, sx(nx) - size * 0.3, sy(ny), size * 0.75);
-      E.text(g, String(Math.max(0, P.moves)), sx(nx) + size * 0.42, sy(ny) + 2, size * 0.5, '#fff');
-      E.emoji(g, '🔄', sx(nx) - size * 0.3, sy(ny) - size * 0.62, size * 0.38);
-      for (let i = 0; i < 4; i++) drawLantern(g, i);
-      if (shot) {
+      const skB = E.skin('basket'); // el estilo puede dibujar el cesto (recibe cómo pintar la siguiente burbuja)
+      if (glOn) { /* nada */ } else if (skB && skB(g, sx(nx), sy(ny), size, (x, y, s) => drawBubble(g, { color: S.next }, x, y, s), Math.max(0, P.moves))) { /* cesto del estilo */ } else {
+        E.rr(g, sx(nx) - size * 0.8, sy(ny) - size * 0.55, size * 1.6, size * 1.1, 12);
+        g.fillStyle = 'rgba(150,100,50,0.85)'; g.fill();
+        drawBubble(g, { color: S.next }, sx(nx) - size * 0.3, sy(ny), size * 0.75);
+        E.text(g, String(Math.max(0, P.moves)), sx(nx) + size * 0.42, sy(ny) + 2, size * 0.5, '#fff');
+      }
+      if (!skB && !glOn) E.emoji(g, '🔄', sx(nx) - size * 0.3, sy(ny) - size * 0.62, size * 0.38); // el cesto de Panda Pop no lleva flechas
+      for (let i = 0; i < 4 && !glOn; i++) drawLantern(g, i);
+      if (shot && !glOn) {
         const [x, y] = pathPoint(shot.pts, shot.d);
         drawBubble(g, shot.b, sx(x), sy(y), size * (shot.b.powers && shot.b.powers.length ? 1.2 : 1));
         if (shot.vine) { g.strokeStyle = '#3fc84a'; g.lineWidth = 8 * k; g.beginPath(); for (let dd = 0; dd < shot.d; dd += 10) { const [vx, vy] = pathPoint(shot.pts, dd); dd ? g.lineTo(sx(vx), sy(vy)) : g.moveTo(sx(vx), sy(vy)); } g.stroke(); }
@@ -1245,8 +1353,16 @@ const GAME = {
 
     P.lanternXY = (i) => lanternXY(i);
     P.autoShot = function () { P.hint(); if (hint) { fire(hint.ang); hint = null; } };
+    let fin = null; // final de Panda Pop ("Pandamonium!"), lo dibuja WebGL
     P.finale = function (done) {
       P.finaleOn = true;
+      S.score += LEFTOVER * Math.max(0, P.moves); P.score = S.score; // Pandamonium: las que sobran puntúan
+      if (window.GL && GL.on && GL.on() && !window.__pasada) {
+        fin = { t0: E.t, dur: 2.6 }; E.sfx('win');
+        for (let r = 0; r < S.grid.length; r++) for (let c = 0; c < colsIn(r); c++) { const b = S.grid[r][c]; if (b) { S.grid[r][c] = null; K.drop(b, r, c); } }
+        E.after(fin.dur, () => { fin = null; P.finaleOn = false; done(); });
+        return;
+      }
       E.floatText(E.W / 2, area.y + area.h * 0.4, '¡Crías a salvo!', '#ffe14d', 46);
       for (let r = 0; r < S.grid.length; r++) for (let c = 0; c < colsIn(r); c++) {
         const b = S.grid[r][c];

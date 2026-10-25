@@ -1,4 +1,94 @@
 'use strict';
+// Reproductor mínimo de esqueletos Spine 4.0 (formato JSON), hecho para este proyecto.
+// Soporta huesos (giro, posición, escala, cizalla), imágenes de región, cambio de imagen y color de las ranuras,
+// y animaciones por claves (lineales o escalonadas). Las mallas deformables no se dibujan.
+const SpineLite = (function () {
+  const D2R = Math.PI / 180;
+  function Skeleton(data, skinName, images) {
+    this.data = data; this.images = images;
+    this.bones = data.bones.map((b) => ({ d: b, parent: null, x: 0, y: 0, rot: 0, sx: 1, sy: 1, shx: 0, shy: 0, a: 1, b: 0, c: 0, dd: 1, wx: 0, wy: 0 }));
+    const byName = {}; this.bones.forEach((b) => { byName[b.d.name] = b; });
+    this.bones.forEach((b) => { if (b.d.parent) b.parent = byName[b.d.parent]; });
+    this.boneByName = byName;
+    // imágenes: la piel elegida encima de la de por defecto
+    this.att = {};
+    for (const sk of data.skins) if (sk.name === 'default' || sk.name === skinName) for (const [slot, atts] of Object.entries(sk.attachments || {})) {
+      this.att[slot] = Object.assign(this.att[slot] || {}, atts);
+    }
+    this.slots = data.slots.map((s) => ({ d: s, bone: byName[s.bone], att: s.attachment || null, col: hex(s.color) }));
+    this.slotByName = {}; this.slots.forEach((s) => { this.slotByName[s.d.name] = s; });
+    this.order = this.slots.slice();
+    this.setup();
+  }
+  function hex(h) { if (!h) return [1, 1, 1, 1]; return [0, 2, 4, 6].map((i) => parseInt(h.substr(i, 2) || 'ff', 16) / 255); }
+  Skeleton.prototype.setup = function () {
+    for (const b of this.bones) { const d = b.d; b.x = d.x || 0; b.y = d.y || 0; b.rot = d.rotation || 0; b.sx = d.scaleX == null ? 1 : d.scaleX; b.sy = d.scaleY == null ? 1 : d.scaleY; b.shx = d.shearX || 0; b.shy = d.shearY || 0; }
+    for (const s of this.slots) { s.att = s.d.attachment || null; s.col = hex(s.d.color); }
+  };
+  // valor de una pista en el tiempo t (claves con time; sin time = 0)
+  function sample(keys, t, fields, defs) {
+    let i = 0; while (i < keys.length - 1 && (keys[i + 1].time || 0) <= t) i++;
+    const k0 = keys[i], t0 = k0.time || 0;
+    const val = (k, f, j) => (k[f] == null ? defs[j] : k[f]);
+    if (i === keys.length - 1 || t < t0 || k0.curve === 'stepped') return fields.map((f, j) => val(k0, f, j));
+    const k1 = keys[i + 1], t1 = k1.time || 0, q = (t - t0) / Math.max(1e-6, t1 - t0);
+    return fields.map((f, j) => val(k0, f, j) + (val(k1, f, j) - val(k0, f, j)) * q);
+  }
+  Skeleton.prototype.apply = function (anim, t) {
+    const A = this.data.animations[anim]; if (!A) return;
+    this.setup();
+    for (const [bn, tl] of Object.entries(A.bones || {})) {
+      const b = this.boneByName[bn]; if (!b) continue; const d = b.d;
+      if (tl.rotate) b.rot = (d.rotation || 0) + sample(tl.rotate, t, ['value'], [0])[0];
+      if (tl.translate) { const v = sample(tl.translate, t, ['x', 'y'], [0, 0]); b.x = (d.x || 0) + v[0]; b.y = (d.y || 0) + v[1]; }
+      if (tl.scale) { const v = sample(tl.scale, t, ['x', 'y'], [1, 1]); b.sx = (d.scaleX == null ? 1 : d.scaleX) * v[0]; b.sy = (d.scaleY == null ? 1 : d.scaleY) * v[1]; }
+      if (tl.shear) { const v = sample(tl.shear, t, ['x', 'y'], [0, 0]); b.shx = (d.shearX || 0) + v[0]; b.shy = (d.shearY || 0) + v[1]; }
+    }
+    for (const [sn, tl] of Object.entries(A.slots || {})) {
+      const s = this.slotByName[sn]; if (!s) continue;
+      if (tl.attachment) { let k = null; for (const kf of tl.attachment) if ((kf.time || 0) <= t) k = kf; if (k) s.att = k.name || null; }
+      if (tl.rgba) { let i = 0; while (i < tl.rgba.length - 1 && (tl.rgba[i + 1].time || 0) <= t) i++; s.col = hex(tl.rgba[i].color); }
+    }
+  };
+  Skeleton.prototype.duration = function (anim) {
+    const A = this.data.animations[anim]; let m = 0; if (!A) return 0;
+    const scan = (o) => { if (Array.isArray(o)) o.forEach((k) => { if (k && k.time > m) m = k.time; }); else if (o && typeof o === 'object') Object.values(o).forEach(scan); };
+    scan(A); return m;
+  };
+  Skeleton.prototype.update = function () {
+    for (const b of this.bones) {
+      const ra = (b.rot + b.shx) * D2R, rb = (b.rot + 90 + b.shy) * D2R;
+      const la = Math.cos(ra) * b.sx, lb = Math.cos(rb) * b.sy, lc = Math.sin(ra) * b.sx, ld = Math.sin(rb) * b.sy;
+      const p = b.parent;
+      if (!p) { b.a = la; b.b = lb; b.c = lc; b.dd = ld; b.wx = b.x; b.wy = b.y; continue; }
+      b.a = p.a * la + p.b * lc; b.b = p.a * lb + p.b * ld; b.c = p.c * la + p.dd * lc; b.dd = p.c * lb + p.dd * ld;
+      b.wx = p.a * b.x + p.b * b.y + p.wx; b.wy = p.c * b.x + p.dd * b.y + p.wy;
+    }
+  };
+  // dibuja con el origen del esqueleto en (x,y) y la escala dada (Spine tiene el eje Y hacia arriba)
+  Skeleton.prototype.draw = function (g, x, y, scale) {
+    this.update();
+    const m0 = g.getTransform();
+    for (const s of this.order) {
+      if (!s.att) continue;
+      const at = (this.att[s.d.name] || {})[s.att]; if (!at || (at.type && at.type !== 'region')) continue;
+      const im = this.images(at.path || at.name || s.att); if (!im) continue;
+      const b = s.bone;
+      g.save();
+      g.globalAlpha = s.col[3];
+      g.setTransform(m0);
+      g.translate(x, y); g.scale(scale, -scale);
+      g.transform(b.a, b.c, b.b, b.dd, b.wx, b.wy);
+      g.translate(at.x || 0, at.y || 0); g.rotate((at.rotation || 0) * D2R); g.scale(at.scaleX == null ? 1 : at.scaleX, at.scaleY == null ? 1 : at.scaleY);
+      const w = at.width || im.width, h = at.height || im.height;
+      g.scale(1, -1);
+      g.drawImage(im, -w / 2, -h / 2, w, h);
+      g.restore();
+    }
+  };
+  return { Skeleton };
+})();
+'use strict';
 // Partes comunes del estilo 'nueva' (patio andaluz): interfaz de cerámica blanca con cenefa azul,
 // fondo de patio con macetas y mapa por un pueblo blanco. Cada juego añade sus piezas en su skins.js.
 const NUEVA = (function () {
@@ -917,6 +1007,19 @@ GAME.skins = {};
   };
   const spr = (key, ts, draw) => E.sprite('img' + key, ts, ts, draw);
   const Rl = (GAME.skins.real = Object.assign({}, O, { images: NAMES, emoji: Object.assign({}, O.emoji) }));
+
+  const MAPIMG = (z) => 'map_' + ((z % 12) + 1) + '.jpg';
+  Rl.images = Rl.images.concat([].filter((n) => !Rl.images.includes(n)));
+  // mapa: cada mundo con su fondo del juego original, a lo ancho de la pantalla (sin los adornos de emoji)
+  Rl.mapNoDecor = true;
+  Rl.mapBg = (g, top, zoneH) => {
+    const z0 = Math.floor(top / zoneH);
+    for (let z = z0 - 1; z <= z0 + 1; z++) {
+      if (z < 0) continue;
+      const zy = -z * zoneH - zoneH + top + E.H, im = E.img(MAPIMG(z)); if (!im) return O.mapBg ? O.mapBg(g, top, zoneH) : null;
+      const s = Math.max(E.W / im.width, zoneH / im.height); g.drawImage(im, (E.W - im.width * s) / 2, zy + (zoneH - im.height * s) / 2, im.width * s, im.height * s);
+    }
+  };
   Rl.tile = function (t, ts, COLORS) {
     switch (t.kind) {
       case 'cube': { const n = 'cube' + t.color + (t.hintK || ''); return spr(n, ts, fit(n, 1.0)); }
@@ -929,9 +1032,158 @@ GAME.skins = {};
       case 'egg': { const n = 'egg' + (t.hp >= 2 ? 2 : 1); return spr(n, ts, fit(n, 0.9)); }
       case 'balloon': case 'gum': case 'ufo': case 'soap': case 'hive': case 'rduck': case 'ice': case 'pumpkin': return spr(t.kind, ts, fit(t.kind, 0.92));
     }
+    const x = XIMG(t); if (x) return spr(x, ts, fit(x, t.big ? 1.0 : 0.95));
     return O.tile(t, ts, COLORS);
   };
   Rl.bubble = fit('bubble', 1.0);
+  // al romperse, el cubo de Toy Blast salta en trozos de su propia imagen
+  Rl.breakFx = (t) => { if (t.kind !== 'cube') return false; const im = E.img('cube' + t.color); if (!im) return false; E.burst(t.x, t.y, null, 5, { img: im, size: 16, speed: 280, up: 200, life: 0.45 }); return true; };
+  // obstáculos montados como en los prefabs de Toy Blast (tools/privado.py → cubos_obs): x_<pieza>[estado]
+  const XN = ['igloo', 'ball', 'duck', 'piggy1', 'piggy2', 'spiggy', 'metal', 'cage', 'fwbase', 'cannon', 'eggpot', 'dragon', 'curtain', 'locker', 'jam', 'hanoi', 'rplat',
+    'monster', 'cocktail', 'plate', 'koala1', 'koala2', 'safe', 'safeopen', 'potion', 'snowman0', 'snowman1', 'snowman2', 'chick0', 'chick1', 'chick2'];
+  for (let i = 0; i < 6; i++) XN.push('cbrick' + i, 'cjar' + i, 'potion' + i, 'orb' + i);
+  for (let i = 0; i < 5; i++) XN.push('fw' + i);
+  for (let k = 1; k <= 4; k++) XN.push('statue' + k);
+  for (let k = 1; k <= 3; k++) XN.push('vase' + k);
+  for (let k = 0; k < 4; k++) XN.push('compass' + k);
+  XN.push('toaster', 'toast', 'bowling1', 'bowling2', 'cuckoo1', 'cuckoo2', 'pwpin');
+  for (let i = 0; i < 6; i++) XN.push('toaster' + i, 'hat' + i, 'pwi' + i, 'pwf' + i);
+  Rl.images = Rl.images.concat(XN.map((n) => 'x_' + n));
+  const XIMG = (t) => {
+    const hp = t.hp || 1;
+    switch (t.kind) {
+      case 'igloo': case 'ball': case 'duck': case 'spiggy': case 'metal': case 'cannon': case 'eggpot': case 'dragon': case 'curtain': case 'locker': case 'jam':
+      case 'hanoi': case 'rplat': case 'monster': case 'cocktail': case 'plate': return 'x_' + t.kind;
+      case 'koala': return hp >= 2 ? 'x_koala2' : 'x_koala1';
+      case 'piggy': return hp >= 2 ? 'x_piggy2' : 'x_piggy1';
+      case 'toaster': return t.color != null ? 'x_toaster' + t.color : 'x_toaster';
+      case 'cuckoo': return hp >= 2 ? 'x_cuckoo2' : 'x_cuckoo1'; // cerrado; tras el primer golpe, abierto con el pájaro
+      case 'bowling': return hp >= 2 ? 'x_bowling2' : 'x_bowling1';
+      case 'hat': return t.color != null ? 'x_hat' + t.color : 'x_hat0';
+      case 'safe': return t.open ? 'x_safeopen' : 'x_safe';
+      case 'chick': return 'x_chick' + (hp >= 3 ? 0 : hp === 2 ? 1 : 2);
+      case 'snowman': return 'x_snowman' + (hp >= 3 ? 0 : hp === 2 ? 1 : 2); // montón, muñeco con cara, muñeco con gorro
+      case 'statue': return 'x_statue' + Math.max(1, Math.min(4, 4 - hp));
+      case 'vase': return 'x_vase' + Math.max(1, Math.min(3, hp));
+      case 'compass': return 'x_compass' + ((t.dir || 0) % 4);
+      case 'cbrick': return t.color != null ? 'x_cbrick' + t.color : null;
+      case 'cjar': return t.color != null ? 'x_cjar' + t.color : null;
+      case 'orb': return t.color != null ? 'x_orb' + t.color : null;
+      case 'potion': return t.color != null ? 'x_potion' + t.color : 'x_potion';
+    }
+    return null;
+  };
+  // molinillo de Toy Blast: cuatro aspas alrededor del eje; blanca con la punta de su color hasta que se combina, luego de color entero
+  const pwTile = Rl.tile;
+  Rl.tile = function (t, ts, COLORS) {
+    if (t.kind !== 'pinwheel' || !t.cols) return pwTile(t, ts, COLORS);
+    return E.sprite('imgpw' + t.cols.join('_'), ts, ts, (g, w, h) => {
+      const k = (w * 0.42) / 53; // aspa de 32x53 a algo menos de media casilla
+      t.cols.forEach((c, i) => {
+        const done = c < 0, col = done ? -c - 1 : c, im = E.img((done ? 'x_pwf' : 'x_pwi') + Math.min(5, col)); if (!im) return;
+        g.save(); g.translate(w / 2, h / 2); g.rotate((i * Math.PI) / 2); g.drawImage(im, 0, -im.height * k, im.width * k, im.height * k); g.restore();
+      });
+      const pin = E.img('x_pwpin'); if (pin) g.drawImage(pin, w / 2 - w * 0.07, h / 2 - h * 0.07, w * 0.14, h * 0.14);
+    });
+  };
+  Object.assign(Rl.emoji, { '🧸': fit('x_duck', 0.95), '🍞': fit('x_toast', 0.9), '🕰️': fit('x_cuckoo2', 0.95), '🎳': fit('x_bowling2', 0.95), '🎩': fit('x_hat0', 0.95) });
+  // fuegos artificiales: la caja de Toy Blast con un cohete de cada color que falta por encender (no hay cohete naranja: el amarillo teñido)
+  const fwTile = Rl.tile;
+  Rl.tile = function (t, ts, COLORS) {
+    if (t.kind !== 'firework') return fwTile(t, ts, COLORS);
+    const cols = (t.cols || []).filter((c) => c >= 0); // solo los cohetes que faltan por encender
+    return E.sprite('imgfw' + cols.join(''), ts, ts, (g, w, h) => {
+      fit('x_fwbase', 0.95)(g, w, h);
+      cols.forEach((c, i) => { const im = c === 5 ? E.tinted('x_fw1', '#ff9a2a') : E.img('x_fw' + c); if (!im) return; const k = (h * 0.62) / im.height, x = w * (0.5 + (i - (cols.length - 1) / 2) * 0.2); g.drawImage(im, x - (im.width * k) / 2, h * 0.16, im.width * k, im.height * k); });
+    });
+  };
+  Rl.cage = (g, s) => { const im = E.img('x_cage'); if (!im) return false; g.drawImage(im, -s / 2, -s / 2, s, s); return true; };
+  // sonidos y músicas de Toy Blast (AudioClip del juego con su nombre). El rotor es el cohete, TNT la bomba y el puzle la bola de discoteca.
+  // Romper cubos: los 9 "booster_train_used_block_0N" (el tren los usa al romper cubos uno a uno), más agudos cuanto más grande el grupo.
+  // Es una deducción: el código de Toy Blast no se puede descompilar y no hay tabla de sonidos en sus datos
+  Rl.sfx = {
+    pop: (p) => ['booster_train_used_block_0' + Math.max(1, Math.min(9, Math.round((p - 0.85) / 0.05)))], land: null, bad: ['click_wrong'], click: ['ui_button_click'], rocket: ['special_item_rotor_used'], bomb: ['Tnt'],
+    magic: ['item_puzzle_explode'], special: ['special_item_created'], collect: ['ui_goal_collect_hit'], rescue: ['item_duck_collect'],
+    star: ['ui_ingame_level_star_1'], win: ['stg_level_won_fanfare'], lose: ['stg_level_fail'],
+  };  // ventanas, estrellas del final y ruleta con sus sonidos de Toy Blast; el golpe de cada cubo recogido, más bajo (suena muchas veces seguidas)
+  Object.assign(Rl.sfx, { star: (p) => ['ui_level_complete_popup_star_' + Math.max(1, Math.min(3, Math.round((p - 1) / 0.2) + 1))], wheelTick: ['fortune_wheel_tick'], wheelWin: ['wheel_spin_won'] });
+  Rl.sfxVol = { ui_goal_collect_hit: -9, Tnt: -3, booster_train_used_block_01: -4, booster_train_used_block_02: -4, booster_train_used_block_03: -4, booster_train_used_block_04: -4,
+    booster_train_used_block_05: -4, booster_train_used_block_06: -4, booster_train_used_block_07: -4, booster_train_used_block_08: -4, booster_train_used_block_09: -4 };
+
+  Rl.music = { game: 'music_gameplay1', map: 'music_map' };
+  // ruleta de premios de Toy Blast: su rueda de 8 casillas y su flecha
+  Rl.images.push('ui_wheel_rotate', 'ui_wheel_arrow');
+  Rl.wheel = { face: 'ui_wheel_rotate', arrow: 'ui_wheel_arrow', n: 8 };
+  // tiempos medidos en el Toy Blast real (emulador, 2026-10-22): caen a 31 casillas/s² y al llegar suben un 7% de casilla y vuelven
+  Rl.timing = { gravity: 31, bounce: 0.07 };
+  // ---- interfaz con las piezas de Toy Blast (tools/privado.py → ui_*.png): barra de arriba en el color del nivel
+  // (azul verdoso normal, rojo difícil, morado superdifícil), cajas crema de objetivos, botones y potenciadores
+  const PAL = ['default', 'hard', 'superhard'];
+  const UI = [];
+  for (const p of PAL) for (const n of ['top_bar_background', 'booster_button_background', 'settings_button_background', 'rect_button_background', 'button_background', 'inner_panel']) UI.push(p + '_' + n);
+  UI.push('topui_goal_background', 'button_mid_background_green', 'dialog_frame_background', 'bottomui_gameplay_booster_settings_button_default');
+  for (const b of ['drill', 'train', 'vacuum', 'bucket', 'paintbrush']) UI.push('ui_bottomui_boosters_booster_bar_' + b);
+  UI.push('booster_bar_button', 'topbar_amy');
+  // Amy, la niña del marcador de Toy Blast, en lugar del emoji de la mascota (marcador y mapa)
+  Rl.emoji = Object.assign({}, Rl.emoji, { '👧': (g, w, h) => { const im = E.img('ui_topbar_amy'); if (!im) return; const s = Math.min((w * 1.25) / im.width, (h * 1.25) / im.height); g.drawImage(im, (w - im.width * s) / 2, (h - im.height * s) / 2, im.width * s, im.height * s); } });
+  Rl.images = Rl.images.concat(UI.map((n) => 'ui_' + n));
+  // fondo: el mapa de Toy Blast detrás del tablero, como en el juego (cambia cada 10 niveles)
+  Rl.images = Rl.images.concat([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((i) => 'map_' + i + '.jpg'));
+  Rl.playBg = (g, w, h) => {
+    const im = E.img('map_' + ((Math.floor((((E.play && E.play.n) || 1) - 1) / 10) % 12) + 1) + '.jpg'); if (!im) return O.playBg(g, w, h);
+    const s = Math.max(w / im.width, h / im.height); g.drawImage(im, (w - im.width * s) / 2, (h - im.height * s) / 2, im.width * s, im.height * s);
+  };
+  const img = (n) => E.img('ui_' + n);
+  Rl.theme = Object.assign({}, O.theme, { hudLabel: '#ffffff' });
+  Rl.font = 'font.ttf'; // Dimbo, reconstruida del atlas SDF de Toy Blast
+  const pal = () => PAL[Math.min(2, E.hardness((E.popup && E.popup.n) || (E.play && E.play.n) || 1))];
+  Rl.hud = (g, W, H) => {
+    const bar = img(pal() + '_top_bar_background'); if (!bar) return O.hud(g, W, H);
+    // la barra entera de Toy Blast, escalada al ancho (lleva el hueco redondo del retrato en medio)
+    const bh = Math.max(H + 24, ((W + 12) * bar.height) / bar.width); g.drawImage(bar, -6, H - bh, W + 12, bh);
+    const box = img('topui_goal_background');
+    for (const [x, w] of [[16, 312], [W - 178, 162]]) if (box) E.nine(g, box, x, 46, w, H - 62, 24, 24);
+    const ax = W / 2 + 40, ay = H / 2 - 4, ring = img(pal() + '_settings_button_background');
+    if (ring) g.drawImage(ring, ax - 56, ay - 56, 112, 112);
+  };
+  Rl.bar = (g, y, W, H) => {
+    const bar = img(pal() + '_top_bar_background'); if (!bar) return O.bar(g, y, W, H);
+    const bh = Math.max(H + 30, ((W + 12) * bar.height) / bar.width);
+    g.save(); g.translate(0, y + H + 30); g.scale(1, -1); g.drawImage(bar, -6, 0, W + 12, bh); g.restore();
+  };
+  Rl.pauseIcon = (g, x, y, w, h) => { const im = img('bottomui_gameplay_booster_settings_button_default'); if (im) g.drawImage(im, x, y, w, h); else O.pauseIcon(g, x, y, w, h); };
+  const BICON = { hammer: 'drill', train: 'train', vacuum: 'vacuum', bucket: 'bucket', brush: 'paintbrush' };
+  Rl.boosterIcon = (g, b, x, y, w, h, have, active) => {
+    const back = img('booster_bar_button') || img(pal() + '_booster_button_background'), ic = img('ui_bottomui_boosters_booster_bar_' + BICON[b.id]);
+    if (!ic) return O.boosterIcon(g, b, x, y, w, h, have, active);
+    if (back) g.drawImage(back, x, y, w, h);
+    const s = Math.min((w * 0.78) / ic.width, (h * 0.78) / ic.height); g.drawImage(ic, x + (w - ic.width * s) / 2, y + (h - ic.height * s) / 2 - 3, ic.width * s, ic.height * s);
+    const tx = x + w - 16, ty = y + h - 14;
+    if (have === Infinity) E.text(g, '∞', tx, ty, 30, '#fff', { stroke: '#1b4f5a', sw: 6 });
+    else if (have > 0) E.text(g, String(have), tx, ty, 28, '#fff', { stroke: '#1b4f5a', sw: 6 });
+    else { g.beginPath(); g.arc(tx, ty, 15, 0, 7); g.fillStyle = '#3cb93c'; g.fill(); g.lineWidth = 3; g.strokeStyle = '#fff'; g.stroke(); E.text(g, '+', tx, ty + 1, 26, '#fff', { stroke: false }); }
+  };
+  // ventanas: marco azul verdoso con el interior crema de Toy Blast
+  Rl.panel = (g, x, y, w, h, opt) => {
+    const fr = img('dialog_frame_background'), inn = img(pal() + '_inner_panel'); if (!fr) return O.panel(g, x, y, w, h, opt);
+    E.nine(g, fr, x, y, w, h, 70, 70); if (inn) E.nine(g, inn, x + 16, y + 16, w - 32, h - 32, 60, 60);
+  };
+  // botones: verde para seguir, rojo y morado de los niveles difíciles, azul verdoso para lo demás
+  Rl.button = (g, x, y, w, h, color, down, r) => {
+    const round = Math.abs(w - h) < 4 || (w <= 120 && h <= 100);
+    const name = round ? 'default_settings_button_background' : color === '#3cb93c' ? 'button_mid_background_green' : color === '#e8453c' || color === '#e8322b' ? 'hard_rect_button_background' : color === '#8a5cd6' ? 'superhard_rect_button_background' : 'default_rect_button_background';
+    const im = img(name); if (!im) return O.button(g, x, y, w, h, color, down, r);
+    if (round) { const d = Math.min(w, h) * (down ? 0.9 : 1); g.drawImage(im, x + (w - d) / 2, y + (h - d) / 2, d, d); }
+    else three(g, im, x, y + (down ? 4 : 0), w, h - 4);
+  };
+  // botón en tres trozos: extremos sin deformar y el centro estirado; a lo alto se escala entero (sin rayas)
+  function three(g, im, x, y, w, h) {
+    x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.round(h); // en píxeles enteros y solapados: sin costuras entre trozos
+    const k = h / im.height, cs = Math.floor(Math.min(im.width / 2 - 1, im.height * 0.6)), cd = Math.round(Math.min(cs * k, w / 2));
+    g.drawImage(im, cs, 0, im.width - 2 * cs, im.height, x + cd - 1, y, w - 2 * cd + 2, h);
+    g.drawImage(im, 0, 0, cs, im.height, x, y, cd, h);
+    g.drawImage(im, im.width - cs, 0, cs, im.height, x + w - cd, y, cd, h);
+  }
   Object.assign(Rl.emoji, { '🚀': fit('rocket', 0.95, Math.PI / 4), '💣': fit('tnt', 0.95), '🔮': fit('puzzle0', 0.95) });
 })();
 
