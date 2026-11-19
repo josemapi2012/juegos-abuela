@@ -1,5 +1,5 @@
 {
- "actualizado": "2026-11-06T21:38:08.765522+00:00",
+ "actualizado": "2026-11-19T20:49:23.823907+00:00",
  "juegos": {
   "cubos": {
    "nivel": 2426,
@@ -14,8 +14,8 @@
    "estrellas": 7
   },
   "burbujas": {
-   "nivel": 616,
-   "estrellas": 12
+   "nivel": 619,
+   "estrellas": 18
   }
  }
 }
